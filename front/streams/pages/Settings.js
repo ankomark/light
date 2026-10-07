@@ -1260,13 +1260,25 @@ const Settings = ({ route } = {}) => {
             <ScrollView style={{ maxHeight: 380 }}>
               {(sessions || []).map((sess) => (
                 <View key={sess.id} style={styles.deviceRow} testID={`device-${sess.id}`}>
-                  <MaterialCommunityIcons name={sess.current ? 'cellphone-check' : 'cellphone'} size={20} color={colors.primary} />
+                  <MaterialCommunityIcons
+                    name={sess.platform === 'ios' ? 'apple' : sess.platform === 'android' ? 'android' : (sess.current ? 'cellphone-check' : 'cellphone')}
+                    size={20}
+                    color={colors.primary}
+                  />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.rowLabel}>
-                      {sess.current ? t('settings.devices.this') : t('settings.devices.other')}
+                    {/* The phone by its name when it sent one (newer app
+                        builds); "This device" / "Other device" otherwise. */}
+                    <Text style={styles.rowLabel} numberOfLines={1}>
+                      {sess.device_name || (sess.current ? t('settings.devices.this') : t('settings.devices.other'))}
                     </Text>
-                    <Text style={styles.rowSub}>
-                      {t('settings.devices.since', { date: new Date(sess.created_at).toLocaleDateString() })}
+                    <Text style={styles.rowSub} numberOfLines={2}>
+                      {[
+                        sess.device_name && sess.current ? t('settings.devices.this') : null,
+                        t('settings.devices.since', { date: new Date(sess.created_at).toLocaleDateString() }),
+                        !sess.current && sess.last_seen_at
+                          ? t('settings.devices.lastSeen', { date: new Date(sess.last_seen_at).toLocaleDateString() })
+                          : null,
+                      ].filter(Boolean).join(' · ')}
                     </Text>
                   </View>
                   {!sess.current && (

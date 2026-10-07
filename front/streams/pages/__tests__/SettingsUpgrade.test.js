@@ -341,3 +341,17 @@ test('every switch is named for a screen reader', () => {
   expect(screen.getByTestId('push-switch').props.accessibilityLabel).toBe('settings.notif.push');
   expect(screen.getByTestId('wallpaper-switch').props.accessibilityLabel).toBe('settings.wallpaper.label');
 });
+
+test('a phone that named itself is listed by its name', async () => {
+  mockApi.fetchSessions.mockResolvedValue({ count: 2, sessions: [
+    { id: 1, current: true, created_at: '2026-10-01T08:00:00Z', device_name: 'Pixel 8', platform: 'android' },
+    { id: 2, current: false, created_at: '2026-09-01T08:00:00Z', last_seen_at: '2026-10-05T08:00:00Z',
+      device_name: 'iPhone 15', platform: 'ios' },
+  ] });
+  const screen = render(<Settings />);
+  await waitFor(() => expect(screen.getAllByText('settings.devices.count:2').length).toBe(1));
+  fireEvent.press(screen.getByTestId('devices'));
+  expect(screen.getByText('Pixel 8')).toBeTruthy();
+  expect(screen.getByText('iPhone 15')).toBeTruthy();
+  expect(screen.queryByText('settings.devices.other')).toBeNull();
+});

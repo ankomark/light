@@ -50,6 +50,56 @@ def _send_verification_email(user, background=False):
 
 
 
+def _device_fields(request):
+    """What the phone says it is (display text only, never trusted for
+    anything): headers set by the app, cut to size and stripped of control
+    characters."""
+    def clean(header, limit):
+        value = str(request.headers.get(header) or '')
+        return ''.join(ch for ch in value if ch.isprintable()).strip()[:limit]
+    platform = clean('X-Device-Platform', 10).lower()
+    return {
+        'name': clean('X-Device-Name', 80),
+        'platform': platform if platform in ('ios', 'android', 'web') else '',
+        'app_version': clean('X-App-Version', 20),
+    }
+
+
+def _record_device(request, user_id, refresh_str, previous_jti=None):
+    """The session `refresh_str` belongs to is on this phone. On a refresh
+    (`previous_jti`) the existing row moves to the new token instead."""
+    from ..models import SessionDevice
+    jti = _refresh_jti(refresh_str)
+    if not (jti and user_id):
+        return
+    fields = {k: v for k, v in _device_fields(request).items() if v}
+    if previous_jti and SessionDevice.objects.filter(jti=previous_jti, user_id=user_id).update(jti=jti, **fields):
+        return
+    SessionDevice.objects.update_or_create(jti=jti, defaults={'user_id': user_id, **fields})
+
+
+def _forget_devices(jtis):
+    from ..models import SessionDevice
+    SessionDevice.objects.filter(jti__in=[j for j in jtis if j]).delete()
+
+
+class DeviceTokenRefreshView(TokenRefreshView):
+    """The usual refresh, keeping track of which phone the session is on as
+    its token rotates."""
+
+    def post(self, request, *args, **kwargs):
+        old = _refresh_jti(request.data.get('refresh'))   # before rotation blacklists it
+        response = super().post(request, *args, **kwargs)
+        if response.status_code == 200 and old and response.data.get('refresh'):
+            try:
+                from rest_framework_simplejwt.tokens import RefreshToken
+                user_id = RefreshToken(response.data['refresh']).get('user_id')
+                _record_device(request, user_id, response.data['refresh'], previous_jti=old)
+            except Exception:  # noqa: BLE001 — naming a device never breaks a refresh
+                pass
+        return response
+
+
 class ThrottledTokenObtainPairView(TokenObtainPairView):
     """Login endpoint with a tight per-IP rate limit to deter credential stuffing.
     On a successful login it fires a best-effort security alert to the account's
@@ -64,6 +114,7 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
                 username = request.data.get('username')
                 user = User.objects.filter(username=username).first()
                 if user:
+                    _record_device(request, user.pk, response.data.get('refresh'))
                     # Logging back in auto-reactivates a self-deactivated account.
                     if user.is_deactivated:
                         user.is_deactivated = False
@@ -290,11 +341,14 @@ def _revoke_other_sessions(user, keep_jti=None, keep_device=None, all_devices=Fa
     # tools ask for a code again too.
     end_sessions(user, 'signed out elsewhere')
     revoked = 0
+    gone = []
     for ot in OutstandingToken.objects.filter(user=user, blacklistedtoken__isnull=True):
         if keep_jti and ot.jti == keep_jti:
             continue
         BlacklistedToken.objects.get_or_create(token=ot)
+        gone.append(ot.jti)
         revoked += 1
+    _forget_devices(gone)
     if all_devices or keep_device:
         from ..models import DeviceToken
         devices = DeviceToken.objects.filter(user=user, is_active=True)
@@ -365,12 +419,23 @@ class SessionsView(APIView):
         # app builds from before the header.
         current_jti = _refresh_jti(request.headers.get('X-Refresh-Token')
                                    or request.query_params.get('refresh'))
-        sessions = [{
-            'id': r.id,
-            'created_at': r.created_at,
-            'expires_at': r.expires_at,
-            'current': bool(current_jti and r.jti == current_jti),
-        } for r in rows]
+        from ..models import SessionDevice
+        rows = list(rows)
+        devices = {d.jti: d for d in SessionDevice.objects.filter(jti__in=[r.jti for r in rows])}
+        sessions = []
+        for r in rows:
+            device = devices.get(r.jti)
+            sessions.append({
+                'id': r.id,
+                # Signed in on that phone (a refresh renews the token, not the sign-in).
+                'created_at': device.created_at if device else r.created_at,
+                'expires_at': r.expires_at,
+                'current': bool(current_jti and r.jti == current_jti),
+                'device_name': device.name if device else '',
+                'platform': device.platform if device else '',
+                'app_version': device.app_version if device else '',
+                'last_seen_at': device.last_seen_at if device else r.created_at,
+            })
         return Response({'count': len(sessions), 'sessions': sessions})
 
 
@@ -388,6 +453,7 @@ class RevokeSessionView(APIView):
         except OutstandingToken.DoesNotExist:
             return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
         BlacklistedToken.objects.get_or_create(token=ot)
+        _forget_devices([ot.jti])
         return Response({'status': 'revoked'})
 
 
@@ -696,6 +762,7 @@ class LogoutView(APIView):
             # blacklisting it would try to remake a row for a user that is gone.
             if User.objects.filter(pk=user_id).exists():
                 token.blacklist()
+                _forget_devices([token.get('jti')])
         except TokenError:
             # Already expired/blacklisted/invalid — the goal (revoked) holds.
             # Whose it was can't be trusted, so no device token is touched.

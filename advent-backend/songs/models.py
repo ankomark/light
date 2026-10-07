@@ -1097,6 +1097,27 @@ class DeviceToken(models.Model):
         return f"{self.user.username} - {self.platform} - {self.token[:30]}..."
 
 
+class SessionDevice(models.Model):
+    """Which phone a signed-in session is on, so "Devices signed in" can say
+    "Mary's Galaxy A14 · Android" rather than "Other device".
+
+    Keyed by the session's refresh-token id (jti). Refresh tokens rotate, so
+    on each refresh the row moves to the new id and its last-seen time moves
+    on; signing in again makes a new row. What the phone said about itself
+    (X-Device-Name / X-Device-Platform / X-App-Version) is display text only
+    and decides nothing."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='session_devices')
+    jti = models.CharField(max_length=255, unique=True)
+    name = models.CharField(max_length=80, blank=True, default='')
+    platform = models.CharField(max_length=10, blank=True, default='')
+    app_version = models.CharField(max_length=20, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username} · {self.name or self.platform or 'device'}"
+
+
 class Notice(models.Model):
     """Notice board posts. Read by everyone; only staff/admins may post
     (admin-role gating to be expanded later — currently uses User.is_staff)."""

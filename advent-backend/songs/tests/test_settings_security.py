@@ -188,3 +188,46 @@ class AppPrefsSyncTests(APITestCase):
     def test_the_language_pushes_are_written_in(self):
         self.assertEqual(self._patch({'language': 'sw'}).data['language'], 'sw')
         self.assertEqual(self._patch({'language': 'fr'}).status_code, 400)
+
+
+class DeviceNameTests(APITestCase):
+    PHONE = {'HTTP_X_DEVICE_NAME': "Mary's Galaxy A14", 'HTTP_X_DEVICE_PLATFORM': 'Android',
+             'HTTP_X_APP_VERSION': '2.4.0'}
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user('mary', 'mary@x.com', 'oldpass123')
+
+    def _login(self, **headers):
+        return self.client.post('/api/auth/token/', {'username': 'mary', 'password': 'oldpass123'},
+                                format='json', **headers).data
+
+    def test_the_list_says_which_phone(self):
+        tokens = self._login(**self.PHONE)
+        self.client.force_authenticate(self.user)
+        r = self.client.get('/api/auth/sessions/', HTTP_X_REFRESH_TOKEN=tokens['refresh'])
+        me = r.data['sessions'][0]
+        self.assertEqual((me['device_name'], me['platform'], me['app_version'], me['current']),
+                         ("Mary's Galaxy A14", 'android', '2.4.0', True))
+
+    def test_the_phone_follows_its_session_through_a_refresh(self):
+        from songs.models import SessionDevice
+        tokens = self._login(**self.PHONE)
+        fresh = self.client.post('/api/auth/token/refresh/', {'refresh': tokens['refresh']}, format='json').data
+        self.assertEqual(SessionDevice.objects.count(), 1)
+        self.client.force_authenticate(self.user)
+        r = self.client.get('/api/auth/sessions/', HTTP_X_REFRESH_TOKEN=fresh['refresh'])
+        self.assertEqual([s['device_name'] for s in r.data['sessions']], ["Mary's Galaxy A14"])
+
+    def test_a_session_signed_out_takes_its_phone_with_it(self):
+        from songs.models import SessionDevice
+        tokens = self._login(**self.PHONE)
+        self.client.post('/api/auth/logout/', {'refresh': tokens['refresh']}, format='json')
+        self.assertEqual(SessionDevice.objects.count(), 0)
+
+    def test_what_a_phone_says_is_cut_to_size(self):
+        from songs.models import SessionDevice
+        self._login(HTTP_X_DEVICE_NAME='x' * 500 + '\x00\x1b', HTTP_X_DEVICE_PLATFORM='toaster')
+        d = SessionDevice.objects.get()
+        self.assertEqual(len(d.name), 80)
+        self.assertEqual(d.platform, '')

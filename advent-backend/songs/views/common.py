@@ -15,7 +15,7 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from django.shortcuts import get_object_or_404 
 from rest_framework.pagination import PageNumberPagination, CursorPagination
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 import time as time_module
 from django.db import transaction
 from django.contrib.auth.decorators import login_required

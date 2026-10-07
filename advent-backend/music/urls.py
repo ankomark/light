@@ -3,11 +3,8 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from rest_framework_simplejwt.views import (
-    TokenRefreshView,
-)
 from songs.views.directory import service_share_page
-from songs.views import SignUpView, ThrottledTokenObtainPairView, LogoutView, health_check, post_share_page, share_brand_image
+from songs.views import SignUpView, ThrottledTokenObtainPairView, DeviceTokenRefreshView, LogoutView, health_check, post_share_page, share_brand_image
 from songs.views.social import profile_share_page
 
 # Django's own admin signs in with a password alone, so it is off unless
@@ -35,7 +32,7 @@ urlpatterns = [
         path('auth/', include([
             path('signup/', SignUpView.as_view(), name='signup'),
             path('token/', ThrottledTokenObtainPairView.as_view(), name='token_obtain_pair'),
-            path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+            path('token/refresh/', DeviceTokenRefreshView.as_view(), name='token_refresh'),
             path('logout/', LogoutView.as_view(), name='logout'),
         ])),
         

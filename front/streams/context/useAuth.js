@@ -8,7 +8,8 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import * as SecureStore from '../services/secureStorage'; // web-safe shim (expo-secure-store stubs web)
-import axios from 'axios';
+import axios from 'axios';
+import '../utils/deviceHeaders'; // names this phone on sign-in and refresh
 import { API_URL, storeTokens, clearTokens } from '../services/api';
 import { clearAllCaches } from '../utils/screenCache';
 import { forgetKeptChapters } from '../services/publicationStore';

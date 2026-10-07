@@ -1,4 +1,5 @@
 import axios from 'axios';
+import '../utils/deviceHeaders'; // names this phone on every request
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from './secureStorage'; // web-safe shim (expo-secure-store stubs web)
 import Constants from 'expo-constants';
