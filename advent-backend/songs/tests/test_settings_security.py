@@ -231,3 +231,36 @@ class DeviceNameTests(APITestCase):
         d = SessionDevice.objects.get()
         self.assertEqual(len(d.name), 80)
         self.assertEqual(d.platform, '')
+
+
+R2 = dict(R2_PUBLIC_BASE='https://media.example.org', R2_ACCESS_KEY_ID='k', R2_SECRET_ACCESS_KEY='s',
+          R2_ENDPOINT='https://r2.example', R2_BUCKET='b')
+
+
+class DeletedAccountFilesTests(APITestCase):
+    def test_their_files_go_and_files_others_use_stay(self):
+        from django.test import override_settings
+        from songs.models import Profile, SocialPost, Story
+        with override_settings(**R2):
+            cache.clear()
+            me = User.objects.create_user('leaving', 'leave@x.com', 'mypass123')
+            other = User.objects.create_user('staying', 'stay@x.com', 'mypass123')
+            base = 'https://media.example.org/'
+            Profile.objects.update_or_create(user=me, defaults={'picture': base + 'avatars/me.jpg'})
+            SocialPost.objects.create(user=me, content_type='image', media_file=base + 'social_media/images/a.jpg',
+                                      song_audio_url=base + 'audio_uploads/song.mp3')
+            # Someone else's post carries the leaving user's song as its sound.
+            SocialPost.objects.create(user=other, content_type='image', media_file=base + 'social_media/images/b.jpg',
+                                      song_audio_url=base + 'audio_uploads/song.mp3')
+            Story.objects.create(user=me, media_url=base + 'stories/s.jpg', expires_at=timezone.now())
+            self.client.force_authenticate(me)
+            deleted = []
+            with mock.patch('songs.r2.delete', side_effect=deleted.append), \
+                    mock.patch('songs.tasks.run_in_background', side_effect=lambda fn, *a, **k: fn(*a, **k)):
+                r = self.client.post('/api/auth/delete-account/', {'password': 'mypass123'}, format='json')
+            self.assertEqual(r.status_code, 204)
+            self.assertIn(base + 'social_media/images/a.jpg', deleted)
+            self.assertIn(base + 'stories/s.jpg', deleted)
+            self.assertIn(base + 'avatars/me.jpg', deleted)
+            self.assertNotIn(base + 'audio_uploads/song.mp3', deleted)
+            self.assertNotIn(base + 'social_media/images/b.jpg', deleted)

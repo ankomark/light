@@ -704,7 +704,18 @@ class DeleteAccountView(APIView):
         if refused:
             return refused
 
+        # Their files go too (songs/account_purge.py): found before the rows
+        # that name them are gone, removed after, off the request thread.
+        from ..account_purge import files_of, purge
+        from ..tasks import run_in_background
+        try:
+            files = files_of(request.user)
+        except Exception:  # noqa: BLE001 — finding the files never blocks leaving
+            logger.exception('could not list the files of account %s', request.user.pk)
+            files = set()
         request.user.delete()
+        if files:
+            run_in_background(purge, sorted(files))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
