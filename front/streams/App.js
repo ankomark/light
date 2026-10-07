@@ -174,6 +174,7 @@ import SinglesTopic from './pages/singles/SinglesTopic';
 import SinglesEvents from './pages/singles/SinglesEvents';
 import SinglesStories from './pages/singles/SinglesStories';
 import { AppStatusProvider, useFeature } from './context/AppStatusContext';
+import SectionGate from './components/SectionGate';
 import MarketClosed from './components/marketplace/MarketClosed';
 import MaintenanceGate from './components/MaintenanceGate';
 import VideoFeed from './components/VideoFeed';
@@ -630,6 +631,8 @@ const App = () => {
             <UploadStatus />
             {/* An admin's authenticator code, asked on whatever screen needs it. */}
             <AdminCodeHost />
+            {/* A part of the app an admin switched off: its screens covered, however reached. */}
+            <SectionGate />
         </NavigationContainer>
       </MaintenanceGate>
       </PlayerProvider>

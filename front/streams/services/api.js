@@ -198,6 +198,10 @@ axios.interceptors.response.use(
   (response) => response,
   async (error) => {
     const config = error.config;
+    if (error.response?.status === 403 && error.response?.data?.code === 'feature_off') {
+      // A part of the app switched off since the app last asked.
+      require('../context/AppStatusContext').reportFeatureOff();
+    }
     if (error.response?.status === 503 && error.response?.data?.code === 'maintenance') {
       // The app has gone down for maintenance since it last asked.
       require('../context/AppStatusContext').reportMaintenance(error.response.data.message);

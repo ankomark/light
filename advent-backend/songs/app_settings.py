@@ -3,17 +3,21 @@ turned off. Read often (every app start asks), so cached briefly; a change
 forgets the cache at once."""
 from django.core.cache import cache
 
-FEATURES = ('marketplace', 'quiz', 'puzzle', 'live', 'singles')
+from .app_sections import KEYS as FEATURES, section_for
+
 DEFAULTS = {
     'maintenance': {'on': False, 'message': ''},
     'features': {name: True for name in FEATURES},
+    # What members are told about a section switched off: {key: text}.
+    'feature_messages': {},
 }
+MESSAGE_MAX = 200
 CACHE_KEY = 'app-status'
 CACHE_SECONDS = 30
 
 
 def status():
-    """{maintenance: {on, message}, features: {name: bool}}."""
+    """{maintenance: {on, message}, features: {name: bool}, messages: {name: text}}."""
     cached = cache.get(CACHE_KEY)
     if cached is not None:
         return cached
@@ -23,6 +27,8 @@ def status():
         'maintenance': {**DEFAULTS['maintenance'], **(stored.get('maintenance') or {})},
         'features': {**DEFAULTS['features'], **{k: bool(v) for k, v in (stored.get('features') or {}).items()
                                                if k in FEATURES}},
+        'messages': {k: str(v)[:MESSAGE_MAX] for k, v in (stored.get('feature_messages') or {}).items()
+                     if k in FEATURES and v},
     }
     cache.set(CACHE_KEY, result, CACHE_SECONDS)
     return result
@@ -57,7 +63,28 @@ class MaintenanceMiddleware:
                 from django.http import JsonResponse
                 return JsonResponse({'code': 'maintenance', 'message': state.get('message') or '',
                                      'detail': 'The app is down for maintenance.'}, status=503)
+        refused = self._section_off(request, path)
+        if refused is not None:
+            return refused
         return self.get_response(request)
+
+    def _section_off(self, request, path):
+        """A request into a section an admin has switched off (app_sections):
+        refused for members, with what they are to be told. Webhooks (one
+        server telling another) always pass."""
+        from django.conf import settings
+        if not getattr(settings, 'SECTION_SWITCHES', True) or '/webhook' in path:
+            return None
+        section = section_for(path)
+        if not section:
+            return None
+        current = status()
+        if current['features'].get(section, True) or self._is_admin(request):
+            return None
+        from django.http import JsonResponse
+        message = current.get('messages', {}).get(section, '')
+        return JsonResponse({'code': 'feature_off', 'section': section, 'message': message,
+                             'detail': 'This part of the app is switched off just now.'}, status=403)
 
     @staticmethod
     def _is_admin(request):

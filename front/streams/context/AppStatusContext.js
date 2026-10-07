@@ -9,17 +9,25 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { API_URL } from '../services/api';
+import { SECTION_KEYS } from '../utils/appSections';
 
+// Every part of the app on until the server says otherwise (utils/appSections.js).
 const DEFAULT = {
   maintenance: { on: false, message: '' },
-  features: { marketplace: true, quiz: true, puzzle: true, live: true, singles: true },
+  features: Object.fromEntries(SECTION_KEYS.map((k) => [k, true])),
+  // What members are told about a part switched off: { key: text }.
+  messages: {},
 };
 
 const AppStatus = createContext({ ...DEFAULT, refresh: () => {} });
 
 let reporter = null;
+let refresher = null;
 /** The server turned a request away for maintenance: show it now. */
 export const reportMaintenance = (message = '') => reporter?.(message);
+/** The server said a part of the app is switched off: read the switches
+ *  again, so its screens close now rather than at the next launch. */
+export const reportFeatureOff = () => refresher?.();
 
 export const AppStatusProvider = ({ children }) => {
   const [status, setStatus] = useState(DEFAULT);
@@ -35,6 +43,7 @@ export const AppStatusProvider = ({ children }) => {
         setStatus({
           maintenance: { ...DEFAULT.maintenance, ...(data.maintenance || {}) },
           features: { ...DEFAULT.features, ...(data.features || {}) },
+          messages: data.messages && typeof data.messages === 'object' ? data.messages : {},
         });
       }
     } catch {
@@ -46,8 +55,9 @@ export const AppStatusProvider = ({ children }) => {
     live.current = true;
     refresh();
     reporter = (message) => setStatus((s) => ({ ...s, maintenance: { on: true, message: message || s.maintenance.message } }));
+    refresher = refresh;
     const sub = AppState.addEventListener('change', (state) => { if (state === 'active') refresh(); });
-    return () => { live.current = false; reporter = null; sub.remove(); };
+    return () => { live.current = false; reporter = null; refresher = null; sub.remove(); };
   }, [refresh]);
 
   const value = useMemo(() => ({ ...status, refresh }), [status, refresh]);
@@ -56,5 +66,5 @@ export const AppStatusProvider = ({ children }) => {
 
 export const useAppStatus = () => useContext(AppStatus);
 
-/** Whether a part of the app is on ('marketplace' | 'quiz' | 'puzzle' | 'live'). */
+/** Whether a part of the app is on (a key of utils/appSections.js). */
 export const useFeature = (name) => useContext(AppStatus).features?.[name] !== false;

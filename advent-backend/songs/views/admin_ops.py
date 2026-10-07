@@ -58,6 +58,16 @@ class AdminAppSettingsView(APIView):
         current = app_settings.status()
         maintenance = request.data.get('maintenance')
         features = request.data.get('features')
+        messages = request.data.get('messages')
+        if messages is not None:
+            if not isinstance(messages, dict) or any(k not in app_settings.FEATURES for k in messages):
+                return Response({'error': f'messages: any of {list(app_settings.FEATURES)}'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            kept = {**current.get('messages', {}),
+                    **{k: str(v or '').strip()[:app_settings.MESSAGE_MAX] for k, v in messages.items()}}
+            app_settings.save('feature_messages', {k: v for k, v in kept.items() if v}, request.user)
+            log_admin_action(request.user, 'set_feature_messages', 'app', None,
+                             reason=', '.join(sorted(messages))[:255])
         if maintenance is not None:
             if not isinstance(maintenance, dict):
                 return Response({'error': 'maintenance: {on, message}'}, status=status.HTTP_400_BAD_REQUEST)

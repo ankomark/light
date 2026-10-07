@@ -63,34 +63,34 @@ const SECTIONS = [
   {
     title: 'Connect',
     items: [
-      { label: 'Messages', route: 'Inbox', art: MESSAGES_ART },
-      { label: 'Groups', route: 'Groups', art: GROUPS_ART },
+      { label: 'Messages', route: 'Inbox', art: MESSAGES_ART, feature: 'messages' },
+      { label: 'Groups', route: 'Groups', art: GROUPS_ART, feature: 'groups' },
       // Adults only, opt-in, reviewed (pages/singles).
       { label: 'Single & Searching', route: 'Singles', set: 'mci', icon: 'ring', tint: '#FFC46B', feature: 'singles' },
       // Churches and choirs are no longer separate entries — they are
       // categories inside Community, alongside any kind someone starts.
-      { label: 'Communities', route: 'Communities', art: COMMUNITIES_ART },
+      { label: 'Communities', route: 'Communities', art: COMMUNITIES_ART, feature: 'groups' },
       // Buy tickets with M-Pesa; no account needed (pages/tickets).
       { label: 'Events & Tickets', route: 'TicketsHome', set: 'mci', icon: 'ticket-confirmation-outline',
-        tint: '#E8D4AA' },
-      { label: 'Notice Board', route: 'NoticeBoard', art: NOTICE_ART },
+        tint: '#E8D4AA', feature: 'tickets' },
+      { label: 'Notice Board', route: 'NoticeBoard', art: NOTICE_ART, feature: 'notices' },
     ],
   },
   {
     title: 'Create & Share',
     items: [
       { label: 'Go Live', route: 'LiveHub', set: 'mci', icon: 'broadcast', danger: true, feature: 'live' },
-      { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART },
-      { label: 'Services', route: 'Studios', art: SERVICES_ART },
+      { label: 'Publishing', route: 'Publishing', art: PUBLISHING_ART, feature: 'books' },
+      { label: 'Services', route: 'Studios', art: SERVICES_ART, feature: 'services' },
     ],
   },
   {
     title: 'Daily Faith',
     items: [
       { label: 'Verse of the Day', route: 'DailyVerse', set: 'mci', icon: 'book-open-variant',
-        tint: VERSE_TEAL },
+        tint: VERSE_TEAL, feature: 'verse' },
       { label: 'Sabbath School', route: 'SabbathSchool', set: 'mci', icon: 'book-education-outline',
-        tint: SABBATH_GOLD },
+        tint: SABBATH_GOLD, feature: 'sabbath_school' },
       { label: 'Bible Quiz', route: 'QuizHome', art: QUIZ_ART, feature: 'quiz' },
       { label: 'Word Puzzle', route: 'PuzzlePlay', art: PUZZLE_ART, feature: 'puzzle' },
     ],
@@ -99,9 +99,9 @@ const SECTIONS = [
     title: 'Tools',
     items: [
       { label: 'Calendar', route: 'Calendar', set: 'mci', icon: 'calendar-month-outline',
-        tint: CALENDAR_RED },
-      { label: 'Weather', route: 'Weather', art: WEATHER_ART },
-      { label: 'Calculator', route: 'Calculator', art: CALC_ART },
+        tint: CALENDAR_RED, feature: 'calendar' },
+      { label: 'Weather', route: 'Weather', art: WEATHER_ART, feature: 'weather' },
+      { label: 'Calculator', route: 'Calculator', art: CALC_ART, feature: 'calculator' },
     ],
   },
   {
