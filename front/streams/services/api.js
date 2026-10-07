@@ -1,4 +1,5 @@
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from './secureStorage'; // web-safe shim (expo-secure-store stubs web)
 import Constants from 'expo-constants';
 import { extractYoutubeId } from '../utils/youtubeUtils';
@@ -2030,23 +2031,34 @@ export const resetPassword = (email, code, new_password) =>
 // Authenticated password change (signed-in user; no email code). Sends the
 // current refresh token so this device stays signed in while other sessions are
 // revoked server-side.
+// This phone's push token (services/pushNotifications.js keeps it): sent when
+// other sessions are signed out, so this phone keeps its notifications and
+// the signed-out phones stop getting them.
+const thisDeviceToken = () => AsyncStorage.getItem('expoPushToken').catch(() => null);
+
 export const changePassword = async (current_password, new_password) => {
-  const refresh = await SecureStore.getItemAsync('refreshToken').catch(() => null);
-  return apiRequest('post', '/auth/change-password/', { current_password, new_password, refresh });
+  const [refresh, device_token] = await Promise.all([
+    SecureStore.getItemAsync('refreshToken').catch(() => null), thisDeviceToken(),
+  ]);
+  return apiRequest('post', '/auth/change-password/', { current_password, new_password, refresh, device_token });
 };
 
 // ── Sessions / security ──────────────────────────────────────────────────────
+// The refresh token rides in a header, never the URL: a URL is written into
+// every access log between here and the server.
 export const fetchSessions = async () => {
   const refresh = await SecureStore.getItemAsync('refreshToken').catch(() => null);
-  return apiRequest('get', '/auth/sessions/', null, { params: refresh ? { refresh } : {} });
+  return apiRequest('get', '/auth/sessions/', null, refresh ? { headers: { 'X-Refresh-Token': refresh } } : {});
 };
 
 export const revokeSession = (id) =>
   apiRequest('post', '/auth/sessions/revoke/', { id });
 
 export const revokeOtherSessions = async () => {
-  const refresh = await SecureStore.getItemAsync('refreshToken').catch(() => null);
-  return apiRequest('post', '/auth/sessions/revoke-others/', { refresh });
+  const [refresh, device_token] = await Promise.all([
+    SecureStore.getItemAsync('refreshToken').catch(() => null), thisDeviceToken(),
+  ]);
+  return apiRequest('post', '/auth/sessions/revoke-others/', { refresh, device_token });
 };
 
 export const exportMyData = () =>

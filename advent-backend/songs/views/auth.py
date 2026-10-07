@@ -15,12 +15,14 @@ def _send_verification_email(user, background=False):
     app. Callers that actually SHOW the user a send failure (resend, password
     reset) must stay synchronous; they cannot report what they did not wait for.
     """
-    import random
+    import secrets
     from django.core.mail import send_mail
     from django.utils import timezone
     from datetime import timedelta
 
-    code = f"{random.randint(0, 999999):06d}"
+    # From the OS's secure source: `random` is predictable from its own
+    # earlier outputs, and these codes stand in for a password.
+    code = f"{secrets.randbelow(1000000):06d}"
     expires_at = timezone.now() + timedelta(minutes=15)
     EmailVerification.objects.create(user=user, code=code, expires_at=expires_at)
 
@@ -150,7 +152,7 @@ class ForgotPasswordView(APIView):
     throttle_scope = 'password_reset'
 
     def post(self, request):
-        import random
+        import secrets
         from django.core.mail import send_mail
         from datetime import timedelta
 
@@ -169,9 +171,10 @@ class ForgotPasswordView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        code = f"{random.randint(0, 999999):06d}"
+        code = f"{secrets.randbelow(1000000):06d}"
         expires_at = timezone.now() + timedelta(minutes=15)
         PasswordResetCode.objects.create(user=user, code=code, expires_at=expires_at)
+        cache.delete(_reset_failures_key(user))
 
         # Send synchronously so a real SMTP failure surfaces to the user instead
         # of a false "code sent" (auth emails must be reliable, not fire-and-forget).
@@ -200,6 +203,16 @@ class ForgotPasswordView(APIView):
 
 
 
+# Wrong reset codes allowed per account before every code it holds stops
+# working. The per-IP throttle alone let someone with many addresses keep
+# guessing at a six-digit code; this caps the guesses at the account.
+RESET_MAX_FAILURES = 5
+
+
+def _reset_failures_key(user):
+    return f'reset-failures:{user.pk}'
+
+
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = 'password_reset'
@@ -219,14 +232,37 @@ class ResetPasswordView(APIView):
         except User.DoesNotExist:
             return Response({'error': 'Invalid code'}, status=status.HTTP_400_BAD_REQUEST)
 
+        failures_key = _reset_failures_key(user)
+        if (cache.get(failures_key) or 0) >= RESET_MAX_FAILURES:
+            return Response({'error': 'Too many wrong codes. Ask for a new code.', 'code': 'too_many'},
+                            status=status.HTTP_400_BAD_REQUEST)
         reset = PasswordResetCode.objects.filter(user=user, code=code, used=False).first()
         if not reset or not reset.is_valid():
+            if not cache.add(failures_key, 1, 60 * 60):
+                try:
+                    cache.incr(failures_key)
+                except ValueError:
+                    cache.set(failures_key, 1, 60 * 60)
+            if (cache.get(failures_key) or 0) >= RESET_MAX_FAILURES:
+                # Every code out for this account stops working at once.
+                PasswordResetCode.objects.filter(user=user, used=False).update(used=True)
             return Response({'error': 'Invalid or expired code'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        try:
+            validate_password(new_password, user)
+        except DjangoValidationError as e:
+            return Response({'error': ' '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
         reset.used = True
         reset.save()
         user.set_password(new_password)
         user.save()
+        cache.delete(failures_key)
+        # A reset is how someone takes their account back: whoever else was
+        # signed in to it is signed out, and their phones stop getting its pushes.
+        _revoke_other_sessions(user, all_devices=True)
         return Response({'message': 'Password reset successfully. Please log in with your new password.'})
 
 
@@ -243,9 +279,15 @@ def _refresh_jti(refresh_str):
         return None
 
 
-def _revoke_other_sessions(user, keep_jti=None):
+def _revoke_other_sessions(user, keep_jti=None, keep_device=None, all_devices=False):
     """Blacklist every active refresh token for `user` except the one matching
-    keep_jti (so the calling device stays signed in). Returns the count revoked."""
+    keep_jti (so the calling device stays signed in). Returns the count revoked.
+
+    Phones signed out this way stop getting the account's pushes too: a
+    stolen phone signed out of the app went on showing message previews on
+    its lock screen. The calling phone names its own push token
+    (`keep_device`) to keep it; `all_devices` stops every one. With neither
+    (an older app), pushes are left alone rather than cutting off the caller."""
     from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
     from ..admin_security import end_sessions
     # Signed out elsewhere (a new password, "sign out everywhere"): the admin
@@ -257,7 +299,18 @@ def _revoke_other_sessions(user, keep_jti=None):
             continue
         BlacklistedToken.objects.get_or_create(token=ot)
         revoked += 1
+    if all_devices or keep_device:
+        from ..models import DeviceToken
+        devices = DeviceToken.objects.filter(user=user, is_active=True)
+        if not all_devices:
+            devices = devices.exclude(token=keep_device)
+        devices.update(is_active=False)
     return revoked
+
+
+def _device_token(request):
+    """The push token the calling phone sends, to keep its own notifications."""
+    return str(request.data.get('device_token') or '').strip() or None
 
 
 class ChangePasswordView(APIView):
@@ -291,7 +344,8 @@ class ChangePasswordView(APIView):
         request.user.save()
         # Security: revoke every other session, keeping the current device signed
         # in when it supplies its refresh token.
-        revoked = _revoke_other_sessions(request.user, keep_jti=_refresh_jti(request.data.get('refresh')))
+        revoked = _revoke_other_sessions(request.user, keep_jti=_refresh_jti(request.data.get('refresh')),
+                                         keep_device=_device_token(request))
         return Response({'message': 'Password updated successfully.', 'sessions_revoked': revoked})
 
 
@@ -310,7 +364,11 @@ class SessionsView(APIView):
             .filter(user=request.user, expires_at__gt=timezone.now(), blacklistedtoken__isnull=True)
             .order_by('-created_at')
         )
-        current_jti = _refresh_jti(request.query_params.get('refresh'))
+        # From a header: a token in the URL is written into every access log
+        # between the phone and here. The query parameter is still read for
+        # app builds from before the header.
+        current_jti = _refresh_jti(request.headers.get('X-Refresh-Token')
+                                   or request.query_params.get('refresh'))
         sessions = [{
             'id': r.id,
             'created_at': r.created_at,
@@ -343,7 +401,8 @@ class RevokeOtherSessionsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        revoked = _revoke_other_sessions(request.user, keep_jti=_refresh_jti(request.data.get('refresh')))
+        revoked = _revoke_other_sessions(request.user, keep_jti=_refresh_jti(request.data.get('refresh')),
+                                         keep_device=_device_token(request))
         return Response({'status': 'ok', 'revoked': revoked})
 
 
@@ -351,6 +410,9 @@ class ExportDataView(APIView):
     """Return a JSON snapshot of the user's own data (account, profile, posts,
     comments, playlists, tracks) — a lightweight GDPR-style export."""
     permission_classes = [IsAuthenticated]
+    # A few thousand rows and a dozen counts: a person needs it now and then,
+    # not in a loop.
+    throttle_scope = 'data_export'
 
     def get(self, request):
         from django.utils import timezone
@@ -498,7 +560,8 @@ class DeactivateAccountView(APIView):
         request.user.is_deactivated = True
         request.user.deactivated_at = timezone.now()
         request.user.save(update_fields=['is_deactivated', 'deactivated_at'])
-        _revoke_other_sessions(request.user)  # sign out everywhere; re-login reactivates
+        # Dark everywhere, pushes included; signing back in reactivates.
+        _revoke_other_sessions(request.user, all_devices=True)
         return Response({'status': 'deactivated'})
 
 
@@ -573,7 +636,10 @@ class LogoutView(APIView):
         try:
             token = RefreshToken(refresh)
             user_id = token.get('user_id')
-            token.blacklist()
+            # A deleted account's token has nothing left to revoke, and
+            # blacklisting it would try to remake a row for a user that is gone.
+            if User.objects.filter(pk=user_id).exists():
+                token.blacklist()
         except TokenError:
             # Already expired/blacklisted/invalid — the goal (revoked) holds.
             # Whose it was can't be trusted, so no device token is touched.

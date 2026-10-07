@@ -14,6 +14,9 @@ const PrivacyCentre = () => {
     icon, title: t(`privacyCentre.${key}`), sub: t(`privacyCentre.${key}Sub`), onPress, testID: `privacy-${key}`,
   });
   const legal = (docKey) => () => navigation.navigate('LegalPage', { docKey });
+  // Straight to the part of Settings each tile is about (Settings searches
+  // for the section's own title), not to the top of a long page.
+  const settingsAt = (sectionKey) => () => navigation.navigate('Settings', { search: t(sectionKey) });
 
   return (
     <InfoScreen title={t('privacyCentre.title')} eyebrow={t('privacyCentre.eyebrow')}
@@ -22,10 +25,10 @@ const PrivacyCentre = () => {
 
       <Section label={t('privacyCentre.controlsLabel')} plain>
         <Tiles items={[
-          tile('lock-outline', 'privateAccount', () => navigation.navigate('Settings')),
+          tile('lock-outline', 'privateAccount', settingsAt('settings.section.privacy')),
           tile('account-cancel-outline', 'blocked', () => navigation.navigate('BlockedUsers')),
-          tile('bell-outline', 'notifications', () => navigation.navigate('Settings')),
-          tile('account-remove-outline', 'account', () => navigation.navigate('Settings')),
+          tile('bell-outline', 'notifications', settingsAt('settings.section.notifications')),
+          tile('account-remove-outline', 'account', settingsAt('settings.section.session')),
         ]} />
       </Section>
 

@@ -242,6 +242,8 @@ REST_FRAMEWORK = {
         'admin_2fa': '10/min',
         # Deleting or deactivating an account: a password check, not to be guessed at.
         'account_leave': '10/hour',
+        # "Export my data": a heavy read, needed now and then.
+        'data_export': '10/hour',
         'email_verify': '10/hour',
         # Abuse guards: appeal/report submission and admin bulk actions.
         # Quiz reads are cheap; the submit is one per day anyway.

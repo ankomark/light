@@ -21,7 +21,7 @@ jest.mock('../../services/pushNotifications', () => ({
   registerForPushNotifications: (...a) => mockPush.registerForPushNotifications(...a),
   unregisterPushToken: (...a) => mockPush.unregisterPushToken(...a),
 }));
-const mockFs = { writeAsStringAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/' };
+const mockFs = { writeAsStringAsync: jest.fn(async () => {}), deleteAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/' };
 jest.mock('expo-file-system/legacy', () => mockFs);
 const mockSharing = { isAvailableAsync: jest.fn(async () => false), shareAsync: jest.fn() };
 jest.mock('expo-sharing', () => mockSharing);
@@ -56,7 +56,7 @@ jest.mock('@react-navigation/native', () => ({ useNavigation: () => mockNav }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null, MaterialCommunityIcons: () => null, MaterialIcons: () => null }));
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
-  return { SafeAreaView: View, initialWindowMetrics: null };
+  return { SafeAreaView: View, initialWindowMetrics: null, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
 });
 jest.mock('../../components/GlassView', () => {
   const { View } = require('react-native');
@@ -317,4 +317,21 @@ describe('wallpapers', () => {
     expect(screen.getByText('settings.wallpaper.offSub')).toBeTruthy();
     expect(screen.getByTestId('wallpaper-switch').props.value).toBe(false);
   });
+});
+
+test('the exported file does not stay behind on the phone', async () => {
+  mockApi.exportMyData.mockResolvedValue({ account: { username: 'mark' } });
+  mockSharing.isAvailableAsync.mockResolvedValueOnce(true);
+  mockSharing.shareAsync.mockResolvedValueOnce(undefined);
+  const screen = render(<Settings />);
+  await act(async () => { fireEvent.press(screen.getByTestId('export-data')); });
+  expect(mockSharing.shareAsync).toHaveBeenCalled();
+  const written = mockFs.writeAsStringAsync.mock.calls.at(-1)[0];
+  expect(mockFs.deleteAsync).toHaveBeenCalledWith(written, { idempotent: true });
+});
+
+test('opened from the Privacy Centre, it is already searched for the part asked for', () => {
+  const screen = render(<Settings route={{ params: { search: 'settings.section.privacy' } }} />);
+  expect(screen.getByTestId('settings-search').props.value).toBe('settings.section.privacy');
+  expect(screen.queryByText('settings.support.about')).toBeNull();
 });

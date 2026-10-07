@@ -62,12 +62,18 @@ const FollowRequests = () => {
 
   const act = async (item, approve) => {
     setBusyId(item.id);
-    const previous = requests;
+    const at = requests.findIndex((r) => r.id === item.id);
     setRequests((cur) => cur.filter((r) => r.id !== item.id));  // optimistic
     try {
       await (approve ? approveFollowRequest(item.id) : rejectFollowRequest(item.id));
     } catch {
-      setRequests(previous);  // revert
+      // Only this one goes back, where it was: putting back the whole list
+      // as it stood would undo another request answered in the meantime.
+      setRequests((cur) => {
+        const next = cur.filter((r) => r.id !== item.id);
+        next.splice(Math.max(0, Math.min(at, next.length)), 0, item);
+        return next;
+      });
       Alert.alert(t('common.error'), t('followReq.updateFailed'));
     } finally {
       setBusyId(null);

@@ -10,12 +10,14 @@ import {
   Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchBlockedUsers, unblockUser } from '../services/api';
 import { typography, spacing, radius, shadows } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import { peekCache, writeCache, userKey } from '../utils/screenCache';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
@@ -24,8 +26,12 @@ const BlockedUsers = () => {
   const { colors } = useTheme();
   const { t } = useI18n();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { currentUser } = useAuth();
+  const insets = useSafeAreaInsets();
+  // The last list seen, at once (and offline); the server's copy behind it.
+  const cacheKey = userKey(currentUser?.id, 'blocked:list');
+  const [users, setUsers] = useState(() => peekCache(cacheKey) || []);
+  const [loading, setLoading] = useState(() => !peekCache(cacheKey));
   const [busyId, setBusyId] = useState(null);
   // A list that could not be read is not an empty one: "no one blocked"
   // would be wrong, and the people blocked would seem free to reach you.
@@ -33,16 +39,20 @@ const BlockedUsers = () => {
 
   const load = useCallback(async () => {
     setFailed(false);
-    setLoading(true);
+    const kept = peekCache(cacheKey);
+    if (!kept) setLoading(true);
     try {
       const data = await fetchBlockedUsers();
-      setUsers(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setUsers(list);
+      writeCache(cacheKey, list);
     } catch {
-      setFailed(true);
+      // A kept list stays up; only with nothing to show is it a failure.
+      if (!kept) setFailed(true);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cacheKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -57,6 +67,7 @@ const BlockedUsers = () => {
           setUsers((cur) => cur.filter((u) => u.id !== item.id)); // optimistic
           try {
             await unblockUser(item.id);
+            writeCache(cacheKey, (peekCache(cacheKey) || []).filter((u) => u.id !== item.id));
           } catch {
             // Back where it was, among the list as it is now.
             setUsers((cur) => {
@@ -102,6 +113,8 @@ const BlockedUsers = () => {
           onPress={() => navigation.goBack()}
           style={styles.backBtn}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
         >
           <Ionicons name="chevron-back" size={26} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -126,7 +139,7 @@ const BlockedUsers = () => {
           data={users}
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: spacing.md + insets.bottom }]}
           ListEmptyComponent={
             <View style={styles.empty}>
               <MaterialCommunityIcons name="account-cancel-outline" size={56} color={colors.border} />

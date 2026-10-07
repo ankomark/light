@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import KeyboardSheetPad from '../components/KeyboardSheetPad';
 import { useNavigation } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
@@ -80,10 +80,17 @@ const PACKAGE_ID =
   Constants.expoConfig?.android?.package ||
   Constants.expoConfig?.ios?.bundleIdentifier ||
   'com.ankom.streams';
-const STORE_URL =
-  Platform.OS === 'ios'
-    ? `itms-apps://itunes.apple.com/app/${PACKAGE_ID}`
-    : `https://play.google.com/store/apps/details?id=${PACKAGE_ID}`;
+// The App Store finds an app by its number, not its bundle id: the old link
+// (itunes.apple.com/app/<bundle id>) opened nothing. The number goes in
+// app.json → expo.extra.iosAppStoreId once the app is listed; until then the
+// store is searched for it by name.
+const IOS_APP_STORE_ID = Constants.expoConfig?.extra?.iosAppStoreId;
+const STORE_URLS = Platform.OS === 'ios'
+  ? [IOS_APP_STORE_ID
+    ? `itms-apps://apps.apple.com/app/id${IOS_APP_STORE_ID}?action=write-review`
+    : `itms-apps://search.itunes.apple.com/WebObjects/MZSearch.woa/wa/search?media=software&term=${encodeURIComponent(APP_NAME)}`]
+  // The Play Store app first; the web page where it is not installed.
+  : [`market://details?id=${PACKAGE_ID}`, `https://play.google.com/store/apps/details?id=${PACKAGE_ID}`];
 
 // Songs come in 64 / 128 / 256 kbps versions (utils/audioQuality.js).
 // Each choice is named through t('settings.quality.<key>').
@@ -114,14 +121,17 @@ const NOTIFICATION_CATEGORIES = [
 ];
 
 // Module scope: no hook here, so the caller passes t in.
-const openLink = async (url, fallbackMsg, t) => {
-  try {
-    const ok = await Linking.canOpenURL(url);
-    if (ok) await Linking.openURL(url);
-    else Alert.alert(t('common.unavailable'), fallbackMsg || t('common.openLinkFailed'));
-  } catch {
-    Alert.alert(t('common.unavailable'), fallbackMsg || t('common.openLinkFailed'));
+// The first of `urls` that opens.
+const openLink = async (urls, fallbackMsg, t) => {
+  for (const url of [].concat(urls)) {
+    try {
+      await Linking.openURL(url);
+      return;
+    } catch {
+      // On to the next.
+    }
   }
+  Alert.alert(t('common.unavailable'), fallbackMsg || t('common.openLinkFailed'));
 };
 
 // ── Reusable building blocks ────────────────────────────────────────────────
@@ -275,8 +285,10 @@ const initialsOf = (name = '') => {
 // shared: Android refuses (and crashes on) much more.
 const SHARE_TEXT_MAX = 200 * 1024;
 
-const Settings = () => {
+const Settings = ({ route } = {}) => {
   const navigation = useNavigation();
+  // `route.params.search`: what to find on opening (the Privacy Centre).
+  const insets = useSafeAreaInsets();
   const { currentUser, isEmailVerified, logout, updateUser } = useAuth();
   const { preferences: prefs, setPreference: updatePref } = usePreferences();
   const colors = SETTINGS_COLORS;
@@ -313,7 +325,11 @@ const Settings = () => {
   const [notifPrefs, setNotifPrefs] = useState(() => peekCache(notifKey));
 
   // What the search box holds, and which list of choices is open.
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(route?.params?.search || '');
+  // Opened again from elsewhere with something to find (the Privacy Centre).
+  useEffect(() => {
+    if (route?.params?.search) setQuery(route.params.search);
+  }, [route?.params?.search]);
   const downloads = useDownloadsSummary();
 
   // Security & sessions (devices signed in), kept like the switches.
@@ -408,6 +424,10 @@ const Settings = () => {
         }
       } catch {
         shared = false;
+      } finally {
+        // Everything the account holds, in plain text: once handed on, it
+        // is not left in the app's cache for anyone else with the phone.
+        Promise.resolve().then(() => FileSystem.deleteAsync(uri, { idempotent: true })).catch(() => {});
       }
       if (!shared) {
         if (text.length > SHARE_TEXT_MAX) throw new Error('too big to share as text');
@@ -499,7 +519,7 @@ const Settings = () => {
       {
         text: t('settings.storage.clear'),
         onPress: async () => {
-          await clearAllCaches();
+          await clearAllCaches().catch(() => {});
           Alert.alert(t('common.done'), t('settings.storage.cleared'));
         },
       },
@@ -512,7 +532,9 @@ const Settings = () => {
       {
         text: t('settings.storage.remove'),
         style: 'destructive',
-        onPress: async () => { await removeAllDownloads(); },
+        onPress: async () => {
+          try { await removeAllDownloads(); } catch { Alert.alert(t('common.error'), t('settings.storage.removeFailed')); }
+        },
       },
     ]);
   };
@@ -712,8 +734,8 @@ const Settings = () => {
         text: t('settings.session.logout'),
         style: 'destructive',
         onPress: async () => {
-          try { await logout(); }
-          finally { navigation.reset({ index: 0, routes: [{ name: 'Login' }] }); }
+          try { await logout(); } catch { /* the phone has forgotten the account either way */ }
+          navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
         },
       },
     ]);
@@ -737,7 +759,8 @@ const Settings = () => {
       </SafeAreaView>
 
       <SettingsSearch.Provider value={query.trim()}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: spacing.lg + insets.bottom }]}
+                  showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled">
         <View style={[styles.searchBox, { marginHorizontal: spacing.md }]}>
           <Ionicons name="search" size={16} color={colors.textMuted} />
@@ -1182,7 +1205,7 @@ const Settings = () => {
           <Row
             icon="star-outline"
             label={t('settings.rateApp', { app: APP_NAME })}
-            onPress={() => openLink(STORE_URL, t('settings.storeUnavailable'), t)}
+            onPress={() => openLink(STORE_URLS, t('settings.storeUnavailable'), t)}
           />
           <Row
             icon="information-outline"
@@ -1214,7 +1237,7 @@ const Settings = () => {
       {/* Devices signed in to this account */}
       <Modal visible={devicesVisible} animationType="slide" transparent onRequestClose={() => setDevicesVisible(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl + insets.bottom }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('settings.devices.label')}</Text>
@@ -1256,7 +1279,7 @@ const Settings = () => {
         onRequestClose={() => setContactVisible(false)}
       >
         <KeyboardSheetPad style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl + insets.bottom }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('settings.contact.title')}</Text>
@@ -1306,7 +1329,7 @@ const Settings = () => {
         onRequestClose={() => { setPwVisible(false); resetPwForm(); }}
       >
         <KeyboardSheetPad style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl + insets.bottom }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('settings.pw.title')}</Text>
@@ -1323,6 +1346,9 @@ const Settings = () => {
               onChangeText={setCurrentPw}
               secureTextEntry={!showPw}
               autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="password"
+              autoComplete="current-password"
             />
             <TextInput
               style={styles.pwInput}
@@ -1332,6 +1358,10 @@ const Settings = () => {
               onChangeText={setNewPw}
               secureTextEntry={!showPw}
               autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="newPassword"
+              autoComplete="new-password"
+              passwordRules="minlength: 8;"
               testID="pw-new"
             />
             {!!newPw && (
@@ -1347,6 +1377,9 @@ const Settings = () => {
               onChangeText={setConfirmPw}
               secureTextEntry={!showPw}
               autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="newPassword"
+              autoComplete="new-password"
             />
             <TouchableOpacity onPress={() => setShowPw((v) => !v)} style={styles.showPw} testID="pw-show">
               <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textSecondary} />
@@ -1379,7 +1412,7 @@ const Settings = () => {
         onRequestClose={() => { setDeleteVisible(false); setDeletePw(''); }}
       >
         <KeyboardSheetPad style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl + insets.bottom }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('settings.deleteTitle')}</Text>
@@ -1401,6 +1434,9 @@ const Settings = () => {
               placeholderTextColor={colors.placeholder}
               value={deletePw}
               onChangeText={setDeletePw}
+              textContentType="password"
+              autoComplete="current-password"
+              autoCorrect={false}
               testID="delete-password"
               secureTextEntry
               autoCapitalize="none"
@@ -1432,7 +1468,7 @@ const Settings = () => {
         onRequestClose={() => { setDeactivateVisible(false); setDeactivatePw(''); }}
       >
         <KeyboardSheetPad style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: spacing.xl + insets.bottom }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('settings.session.deactivate')}</Text>
@@ -1454,6 +1490,9 @@ const Settings = () => {
               placeholderTextColor={colors.placeholder}
               value={deactivatePw}
               onChangeText={setDeactivatePw}
+              textContentType="password"
+              autoComplete="current-password"
+              autoCorrect={false}
               secureTextEntry
               autoCapitalize="none"
             />
