@@ -34,7 +34,10 @@ jest.mock('../../utils/quizDraft', () => ({
   loadDraft: jest.fn(async () => null), saveDraft: jest.fn(), clearDraft: jest.fn(),
 }));
 const mockConfirm = jest.fn(async () => true);
-jest.mock('../../utils/adminConfirm', () => ({ confirmAction: (...a) => mockConfirm(...a) }));
+const mockNotify = jest.fn();
+jest.mock('../../utils/adminConfirm', () => ({
+  confirmAction: (...a) => mockConfirm(...a), notify: (...a) => mockNotify(...a),
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('react-native-safe-area-context', () => {
   const { View } = require('react-native');
@@ -138,6 +141,32 @@ describe('the daily quiz', () => {
     fireEvent.press(screen.getByText('quiz.submit:1,1'));
     await waitFor(() => expect(screen.getByText('quiz.review')).toBeTruthy());
     expect(screen.queryByText('raw English')).toBeNull();
+  });
+
+  test('hands in the day it was played, in the order it was shown', async () => {
+    mockApi.fetchDailyQuiz.mockResolvedValueOnce(quiz({ questions: [question(1)], shuffled: true, date: '2026-10-06' }));
+    mockApi.submitDailyQuiz.mockResolvedValue({ score: 1, total: 1, points: 10, longest_streak: 1, results: [results[0]] });
+    const screen = render(<BibleQuiz navigation={nav()} />);
+    await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+    expect(mockApi.fetchDailyQuiz).toHaveBeenCalledWith(undefined, 'en', { play: true });
+    fireEvent.press(screen.getByLabelText('A. Alpha'));
+    fireEvent.press(screen.getByText('quiz.submit:1,1'));
+    await waitFor(() => expect(mockApi.submitDailyQuiz).toHaveBeenCalled());
+    expect(mockApi.submitDailyQuiz.mock.calls[0][3]).toEqual({ date: '2026-10-06', shuffled: true });
+  });
+
+  test("a day closed since it was begun: told so, and today's quiz opens", async () => {
+    mockApi.fetchDailyQuiz.mockResolvedValueOnce(quiz({ questions: [question(1)], date: '2026-10-06' }));
+    mockApi.submitDailyQuiz.mockRejectedValue({ response: { data: { code: 'closed' } } });
+    const screen = render(<BibleQuiz navigation={nav()} />);
+    await waitFor(() => expect(screen.getByText('Prompt 1')).toBeTruthy());
+    mockApi.fetchDailyQuiz.mockResolvedValue(quiz({ questions: [question(5)] }));
+    fireEvent.press(screen.getByLabelText('A. Alpha'));
+    fireEvent.press(screen.getByText('quiz.submit:1,1'));
+    await waitFor(() => expect(mockNotify).toHaveBeenCalledWith('quiz.dayClosedTitle', 'quiz.dayClosedBody'));
+    await waitFor(() => expect(screen.getByText('Prompt 5')).toBeTruthy());
+    // Yesterday's answer does not count toward today's.
+    expect(screen.getByText('quiz.submit:0,1')).toBeTruthy();
   });
 
   test('a failed load says so in the reader’s language, not the server’s', async () => {

@@ -59,6 +59,18 @@ PAST_DAYS = 7
 SUBMIT_GRACE_SECONDS = 2 * 60 * 60
 
 
+def _question_id(request):
+    """The `question_id` sent, as a number — None for anything else (an
+    offline pack's "off-3", a typo), so a lookup answers 400/404, not 500."""
+    raw = request.data.get('question_id')
+    if isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _lock_player(user):
     """Hold this person's row for the rest of the transaction: two requests
     of theirs that must not both pass a check (one attempt a day, a balance
@@ -504,7 +516,7 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         behind it. POST {question_id, level: why|simple|children, language}.
         Only for a question you have already answered."""
         from .. import quiz_ai
-        question = QuizQuestion.objects.filter(pk=request.data.get('question_id')).first()
+        question = QuizQuestion.objects.filter(pk=_question_id(request)).first()
         if not question:
             raise NotFound('No such question.')
         try:
@@ -549,7 +561,7 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         a question you have answered — reporting is for what you were asked.
         Once per question per person; a copy is kept for the admin queue."""
         from ..quiz_ai import has_answered
-        question = (QuizQuestion.objects.filter(pk=request.data.get('question_id'))
+        question = (QuizQuestion.objects.filter(pk=_question_id(request))
                     .select_related('quiz', 'session').first())
         if not question:
             raise NotFound('No such question.')
@@ -630,6 +642,13 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
                                         corpus, famous=4, bank=False)
             except ValueError as exc:
                 raise APIException(str(exc))
+            # Today's quiz exists before the pack is made, so none of its
+            # verses can travel in the pack with their answers.
+            for language in ('en', 'sw'):
+                try:
+                    generate_for_date(day, language=language)
+                except ValueError:
+                    pass
             todays = set(QuizQuestion.objects.filter(quiz__date=day).values_list('reference', flat=True))
             fields = ('kind', 'difficulty', 'category', 'prompt', 'passage', 'choices',
                       'answer_index', 'reference', 'explanation')
@@ -793,7 +812,7 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
                 if session.is_finished:
                     return Response({'error': 'This run is already over.', 'code': 'finished'},
                                     status=status.HTTP_400_BAD_REQUEST)
-                question = session.questions.filter(pk=request.data.get('question_id')).first()
+                question = session.questions.filter(pk=_question_id(request)).first()
                 if not question:
                     raise ValidationError({'question_id': 'Not a question in this run.'})
                 if QuizAnswer.objects.filter(session=session, question=question).exists():
@@ -815,7 +834,9 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
                     _lock_player(request.user)
                     room = max(0, PRACTICE_COINS_PER_DAY - _practice_coins_today(request.user))
                     if earned > room:
+                        # What it is still worth today, said as what it pays.
                         earned, capped = room, True
+                        parts = {'base': room, 'speed': 0, 'streak': 0}
 
                 QuizAnswer.objects.create(
                     session=session, question=question, chosen_index=chosen,
@@ -902,7 +923,7 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
         if session.is_finished:
             return Response({'error': 'This run is already over.', 'code': 'finished'},
                             status=status.HTTP_400_BAD_REQUEST)
-        question = session.questions.filter(pk=request.data.get('question_id')).first()
+        question = session.questions.filter(pk=_question_id(request)).first()
         if not question:
             raise ValidationError({'question_id': 'Not a question in this run.'})
         if QuizAnswer.objects.filter(session=session, question=question).exists():

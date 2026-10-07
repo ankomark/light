@@ -307,7 +307,7 @@ def _gap_word(rng, words, corpus):
     candidates = [
         (i, clean(w)) for i, w in enumerate(words)
         if i > 0 and len(clean(w)) > 3 and clean(w).lower() not in stop
-        and counts[clean(w).lower()] == 1
+        and counts[clean(w).lower()] == 1 and not any(ch.isdigit() for ch in clean(w))
     ]
     return rng.choice(candidates) if candidates else None
 
@@ -652,7 +652,7 @@ def _book_words(corpus, book_number):
         for text in texts:
             for w in text.split()[1:]:            # a first word's capital is the sentence's
                 cw = clean(w)
-                if len(cw) > 3 and cw.lower() not in stop:
+                if len(cw) > 3 and cw.lower() not in stop and not any(ch.isdigit() for ch in cw):
                     seen.setdefault(cw, None)
         words = list(seen)
         kept['words'][book_number] = words

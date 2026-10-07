@@ -138,8 +138,9 @@ class AdminQuestionReportViewSet(viewsets.ReadOnlyModelViewSet):
             raise ValidationError({'status': 'fixed or dismissed.'})
         same = QuestionReport.objects.filter(status=QuestionReport.OPEN)
         same = (same.filter(bank_question_id=report.bank_question_id) if report.bank_question_id
+                else same.filter(question_id=report.question_id) if report.question_id
                 else same.filter(pk=report.pk))
-        # One decision settles every open report of the same written question.
+        # One decision settles every open report of the same question.
         same.update(status=outcome, resolved_by=request.user, resolved_at=timezone.now())
         if request.data.get('retire') and report.bank_question_id:
             BankQuestion.objects.filter(pk=report.bank_question_id).update(is_active=False)

@@ -41,7 +41,7 @@ import { loadDraft, saveDraft, clearDraft } from '../utils/quizDraft';
 import { peekCache, writeCache, userKey } from '../utils/screenCache';
 import { quizKeys, quizLanguage, isToday, formatQuizDay, withAttempt } from '../utils/quizCache';
 import { fetchBibleBooks } from '../services/bible';
-import { confirmAction } from '../utils/adminConfirm';
+import { confirmAction, notify } from '../utils/adminConfirm';
 // One backdrop and one coin for every quiz screen, so a change lands everywhere.
 import { Backdrop, Coin, Coins } from './quizTheme';
 
@@ -101,6 +101,8 @@ const BibleQuiz = ({ navigation }) => {
   // clock cannot mint points).
   const questionShownAt = useRef(Date.now());
   const spent = useRef({});
+  // The day of the quiz now on screen, to know when a new day's replaces it.
+  const adoptedDate = useRef(null);
 
   // Which board: today, this week or all time; everyone or the people you
   // follow. Read through refs so a tab change reloads the board only.
@@ -173,6 +175,15 @@ const BibleQuiz = ({ navigation }) => {
       clearDraft(currentUser?.id);
       loadBoard();
     } else {
+      // A new day's quiz starts clean: yesterday's answers belong to
+      // questions that are not in it. Only when the day changes — the same
+      // quiz adopted again keeps what has been answered.
+      if (adoptedDate.current && adoptedDate.current !== data?.date) {
+        setAnswers({});
+        setIndex(0);
+        spent.current = {};
+      }
+      adoptedDate.current = data?.date;
       // Pick up an interrupted run rather than losing the day's one attempt.
       const draft = await loadDraft(data?.date, currentUser?.id);
       if (draft) {
@@ -385,6 +396,14 @@ const BibleQuiz = ({ navigation }) => {
         // Played on another phone: show that result instead of an error.
         setError('');
         clearDraft(currentUser?.id);
+        load();
+        return;
+      }
+      if (code === 'closed') {
+        // Begun before midnight, handed in too long after: that day is over.
+        // Today's quiz is waiting instead.
+        clearDraft(currentUser?.id);
+        notify(t('quiz.dayClosedTitle'), t('quiz.dayClosedBody'));
         load();
         return;
       }

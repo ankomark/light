@@ -250,6 +250,12 @@ class GeneratorTests(Base):
 
 
 class BankCalibrationTests(Base):
+    def test_offline_pack_never_carries_a_verse_of_todays_quiz(self):
+        pack = self.client.get('/api/quiz/offline-pack/').data['questions']
+        todays = set(QuizQuestion.objects.filter(quiz__date=local_today()).values_list('reference', flat=True))
+        self.assertTrue(todays)                                     # built first, so it can be avoided
+        self.assertFalse(todays & {q['reference'] for q in pack})
+
     def test_offline_pack_carries_answers_but_no_written_questions(self):
         res = self.client.get('/api/quiz/offline-pack/')
         self.assertEqual(res.status_code, 200)
@@ -311,6 +317,14 @@ class ReportTests(Base):
         self.assertEqual(len(QuestionReport.objects.get().note), 500)
         again = self.client.post('/api/quiz/report/', {'question_id': qid, 'reason': 'typo'}, format='json')
         self.assertEqual(again.data['status'], 'already_reported')
+
+    def test_a_question_id_that_is_not_a_number_is_refused_cleanly(self):
+        run = self.client.post('/api/quiz-sessions/', {'mode': 'speed'}, format='json').data
+        for url, code in ((f"/api/quiz-sessions/{run['id']}/answer/", 400),
+                          (f"/api/quiz-sessions/{run['id']}/hint/", 400),
+                          ('/api/quiz/why/', 404), ('/api/quiz/report/', 404)):
+            res = self.client.post(url, {'question_id': 'off-3', 'choice': 0, 'reason': 'typo'}, format='json')
+            self.assertEqual(res.status_code, code, url)
 
     def test_a_reason_is_required(self):
         questions = self.client.get('/api/quiz/today/').data['questions']
@@ -383,6 +397,18 @@ class AdminQuizTests(Base):
         self.assertEqual(res.data['status'], 'finished')
         b.refresh_from_db()
         self.assertEqual(b.status, Battle.FINISHED)
+
+    def test_reports_of_one_generated_question_are_settled_together(self):
+        quiz = generate_for_date(local_today())
+        q = quiz.questions.filter(bank_question__isnull=True).first()
+        for name in ('rep3', 'rep4'):
+            u = User.objects.create_user(username=name, email=f'{name}@x.com', password='pw-123456')
+            QuestionReport.objects.create(user=u, question=q, prompt=q.prompt, choices=q.choices,
+                                          answer_index=q.answer_index, reason='unclear')
+        first = QuestionReport.objects.first()
+        self._ok(self.client.post(f'/api/admin/quiz-reports/{first.id}/resolve/', {'status': 'dismissed'},
+                                  format='json'))
+        self.assertFalse(QuestionReport.objects.filter(status='open').exists())
 
     def test_a_story_pack_must_fit_its_book(self):
         res = self._ok(self.client.post('/api/admin/story-packs/', {
