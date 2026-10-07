@@ -36,6 +36,7 @@ ADMIN_CAPABILITIES = (
     ('manage_app', 'Maintenance mode & switching parts of the app off'),
     ('review_singles', 'Review Single & Searching profiles and photos'),
     ('manage_tickets', 'Approve events & activate ticket tills (Events & Tickets)'),
+    ('manage_security', 'Security centre: attacks, blocked addresses, locked accounts, recovery'),
 )
 ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
 
@@ -78,6 +79,11 @@ class User(AbstractUser):
     suspended_until = models.DateTimeField(null=True, blank=True)
     # Escalating moderation warnings (warn -> temp suspend -> ban).
     strikes = models.PositiveIntegerField(default=0)
+    # A ban (is_active=False): why, since when, and — for a temporary one —
+    # until when. A ban past its end is lifted the next time they sign in.
+    ban_reason = models.CharField(max_length=255, blank=True, default='')
+    banned_at = models.DateTimeField(null=True, blank=True)
+    banned_until = models.DateTimeField(null=True, blank=True)
 
     # Lifetime likes across everything this user has published — social posts,
     # tracks and publications — shown as a stat on the profile (TikTok-style).
@@ -817,6 +823,104 @@ class Report(models.Model):
 
     def __str__(self):
         return f"Report by {self.reporter.username}: {self.content_type} #{self.object_id}"
+
+
+class LoginAttempt(models.Model):
+    """One try at signing in: who it was for, from where, and how it went —
+    what the Security Centre reads to see a password being guessed (one
+    account, many tries) or stolen passwords being tried (one address, many
+    accounts). Kept 90 days (songs/security.py prune)."""
+    OK, BAD_PASSWORD, UNKNOWN, BANNED, LOCKED, BLOCKED = 'ok', 'bad_password', 'unknown', 'banned', 'locked', 'blocked'
+    username = models.CharField(max_length=150, db_index=True)
+    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='login_attempts')
+    ip = models.CharField(max_length=45, blank=True, default='', db_index=True)
+    outcome = models.CharField(max_length=16, default=OK)
+    device_name = models.CharField(max_length=80, blank=True, default='')
+    user_agent = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['ip', '-created_at']), models.Index(fields=['username', '-created_at'])]
+
+
+class BlockedIP(models.Model):
+    """An address (or range, 41.90.0.0/16) refused everything, by an admin or
+    by the attack rules; until `expires_at`, or for good when it is empty."""
+    network = models.CharField(max_length=64, unique=True)
+    reason = models.CharField(max_length=255, blank=True, default='')
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    automatic = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class SecurityEvent(models.Model):
+    """Something the attack rules noticed, for the Security Centre: open until
+    an admin marks it handled."""
+    KINDS = (
+        ('password_guessing', 'Password guessing on one account'),
+        ('credential_stuffing', 'Many accounts tried from one address'),
+        ('signup_burst', 'Many sign-ups from one address'),
+        ('ban_evasion', 'A banned person may be back'),
+        ('rate_limit_spike', 'Many requests refused for going too fast'),
+        ('account_takeover', 'Someone says a sign-in was not them'),
+    )
+    kind = models.CharField(max_length=24, choices=KINDS)
+    severity = models.CharField(max_length=8, default='medium')   # low | medium | high
+    ip = models.CharField(max_length=45, blank=True, default='')
+    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='security_events')
+    detail = models.CharField(max_length=255, blank=True, default='')
+    count = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+
+    class Meta:
+        ordering = ['-last_seen_at']
+
+
+class RecoveryCase(models.Model):
+    """Someone who cannot get into their account asking for help — the
+    password changed by someone else, the email lost. An admin checks it is
+    really theirs (the account's history, what they can tell us), then
+    changes the account's email, sends a reset, signs everyone else out, and
+    closes the case. `user` is the account it seems to be about (null when
+    nothing matched: the asker is never told either way)."""
+    OPEN, RESOLVED, REJECTED = 'open', 'resolved', 'rejected'
+    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='recovery_cases')
+    account = models.CharField(max_length=254)          # the username or email they gave
+    contact_email = models.EmailField()                 # where to reach them now
+    details = models.TextField(max_length=2000, blank=True, default='')
+    ip = models.CharField(max_length=45, blank=True, default='')
+    status = models.CharField(max_length=10, default=OPEN, db_index=True)
+    note = models.CharField(max_length=500, blank=True, default='')
+    handled_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class MassTakedown(models.Model):
+    """Everything of one account taken down at once (a spammer, a hijacked
+    account), with exactly what was taken — so "restore" brings back those
+    items and nothing removed before for another reason."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mass_takedowns')
+    actor = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
+    reason = models.CharField(max_length=255, blank=True, default='')
+    # {kind: [ids]} — the items this takedown removed.
+    items = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    restored_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
 
 class AdminActionLog(models.Model):

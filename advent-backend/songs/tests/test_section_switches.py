@@ -3,6 +3,7 @@
     python manage.py test songs.tests.test_section_switches --settings=music.settings_test
 """
 from django.core.cache import cache
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from songs import app_settings
@@ -28,6 +29,7 @@ class SectionMapTests(APITestCase):
             self.assertIn(key, KEYS)
 
 
+@override_settings(SECTION_SWITCHES=True)
 class SwitchTests(APITestCase):
     def setUp(self):
         cache.clear()

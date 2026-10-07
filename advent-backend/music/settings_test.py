@@ -49,3 +49,10 @@ ADMIN_2FA_REQUIRED = False
 # The maintenance check reads the app's switches (one query on a cold cache),
 # which would unsettle the query-count tests; its own tests switch it on.
 MAINTENANCE_CHECK = False
+
+# Likewise the per-section switches (songs/app_sections.py): off here, on in
+# their own tests (test_section_switches, override_settings).
+SECTION_SWITCHES = False
+
+# And the blocked-address check (songs/security.py): on in its own tests.
+SECURITY_BLOCKS = False

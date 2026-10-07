@@ -162,16 +162,20 @@ class AdminUserHistoryView(APIView):
     def get(self, request, pk):
         from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
         user = get_object_or_404(User, pk=pk)
-        theirs = Q()
-        for ctype, ids in (
-            ('user', [user.pk]),
-            ('post', SocialPost.objects.filter(user=user).values_list('pk', flat=True)),
-            ('comment', PostComment.objects.filter(user=user).values_list('pk', flat=True)),
-            ('track', Track.objects.filter(artist=user).values_list('pk', flat=True)),
-            ('product', Product.objects.filter(seller=user).values_list('pk', flat=True)),
-        ):
-            # A subquery, not every id read into memory first.
-            theirs |= Q(content_type=ctype, object_id__in=ids)
+        from .admin import _AUTHOR_FIELD, _CONTENT_MODELS
+        # Reports on the account itself and on everything of every kind they
+        # posted — each a subquery, not every id read into memory first.
+        theirs = Q(content_type='user', object_id=user.pk)
+        content = {}
+        for ctype, Model in _CONTENT_MODELS.items():
+            field = _AUTHOR_FIELD.get(ctype)
+            if not field:
+                continue
+            mine = Model.objects.filter(**{field: user})
+            theirs |= Q(content_type=ctype, object_id__in=mine.values('pk'))
+            up, down = mine.filter(is_removed=False).count(), mine.filter(is_removed=True).count()
+            if up or down:
+                content[ctype] = {'up': up, 'removed': down}
         against = Report.objects.filter(theirs).order_by('-created_at')
         actions = AdminActionLog.objects.filter(target_type='user', target_id=user.pk).order_by('-created_at')[:30]
         devices = OutstandingToken.objects.filter(user=user, expires_at__gt=timezone.now(),
@@ -180,6 +184,10 @@ class AdminUserHistoryView(APIView):
             'id': user.pk, 'username': user.username, 'joined': user.date_joined, 'last_seen_at': user.last_seen_at,
             'strikes': user.strikes, 'is_active': user.is_active, 'is_suspended': user.is_currently_suspended,
             'suspension_reason': user.suspension_reason,
+            'suspended_until': user.suspended_until,
+            'ban_reason': user.ban_reason, 'banned_at': user.banned_at, 'banned_until': user.banned_until,
+            'content': content,
+            'can_restore_all': user.mass_takedowns.filter(restored_at__isnull=True).exists(),
             'posts': SocialPost.objects.filter(user=user).count(),
             'products': Product.objects.filter(seller=user).count(),
             'devices_signed_in': devices,

@@ -607,6 +607,12 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             return [RecentSuperAdmin()]
         if a in ('ban', 'unban'):
             return [Cap('ban_users', recent=True)()]
+        if a in ('takedown_all', 'restore_all'):
+            return [Cap('remove_content', recent=True)()]
+        if a == 'sign_out':
+            return [Cap('manage_users', 'ban_users', recent=True)()]
+        if a == 'devices':
+            return [Cap('manage_users', 'ban_users')()]
         if a in ('suspend', 'unsuspend', 'warn'):
             return [Cap('manage_users')()]
         # list / retrieve: any user-facing moderation capability can browse users
@@ -649,7 +655,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             qs = qs.filter(is_suspended=True).filter(
                 Q(suspended_until__isnull=True) | Q(suspended_until__gt=timezone.now()))
         elif state == 'banned':
-            qs = qs.filter(is_active=False)
+            qs = qs.filter(is_active=False).order_by('-banned_at', '-date_joined')
         elif state == 'warned':
             qs = qs.filter(strikes__gt=0)
         return qs.select_related('admin_two_factor')
@@ -773,13 +779,25 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         reason, refused = reason_of(request)
         if refused:
             return refused
+        # Optional `days` for a ban that ends by itself (lifted at their next
+        # sign-in after it); none or 0 is for good.
+        try:
+            days = max(0, min(int(request.data.get('days') or 0), 3650))
+        except (TypeError, ValueError):
+            days = 0
+        now = timezone.now()
         user.is_active = False
-        user.save(update_fields=['is_active'])
+        user.ban_reason = reason
+        user.banned_at = now
+        user.banned_until = now + timedelta(days=days) if days else None
+        user.save(update_fields=['is_active', 'ban_reason', 'banned_at', 'banned_until'])
         from ..admin_security import cut_off
         cut_off(user, 'banned')
         _after_ban = request.user
+        span = f' for {days} day(s)' if days else ''
         notify_moderation(user, 'Account banned',
-                          'Your account has been banned and you can no longer sign in.' + (f" Reason: {reason}" if reason else ''))
+                          f'Your account has been banned{span} and you can no longer sign in.'
+                          + (f" Reason: {reason}" if reason else ''))
         log_admin_action(request.user, 'ban_user', 'user', user.id, reason=reason)
         from ..admin_alerts import on_ban
         on_ban(_after_ban)
@@ -791,9 +809,118 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         if refused:
             return refused
         user.is_active = True
-        user.save(update_fields=['is_active'])
+        user.ban_reason, user.banned_at, user.banned_until = '', None, None
+        user.save(update_fields=['is_active', 'ban_reason', 'banned_at', 'banned_until'])
+        notify_moderation(user, 'Ban lifted', 'Your account is open again. Welcome back.')
         log_admin_action(request.user, 'unban_user', 'user', user.id)
         return Response(self.get_serializer(user).data)
+
+    # ── One account, all at once ─────────────────────────────────────────────
+    def _owned(self, user):
+        """{kind: [ids]} of everything of `user`'s that is up now."""
+        out = {}
+        for kind, Model in _CONTENT_MODELS.items():
+            field = _AUTHOR_FIELD.get(kind)
+            if not field:
+                continue
+            ids = list(Model.objects.filter(**{field: user}, is_removed=False).values_list('id', flat=True))
+            if ids:
+                out[kind] = ids
+        return out
+
+    @action(detail=True, methods=['post'], url_path='takedown-all')
+    def takedown_all(self, request, pk=None):
+        """POST {reason}: everything this account has up, taken down at once
+        (a spammer, a hijacked account) — recorded, so it can be restored."""
+        from ..models import MassTakedown
+        user, refused = self._target(request, pk, 'take down the content of')
+        if refused:
+            return refused
+        reason, refused = reason_of(request)
+        if refused:
+            return refused
+        items = self._owned(user)
+        for kind, ids in items.items():
+            Model = _CONTENT_MODELS[kind]
+            sync_removal_likes(Model, ids, True)
+            Model.objects.filter(id__in=ids).update(is_removed=True)
+            if Model is LiveBroadcast:
+                _end_live(ids)
+            if Model is Group:
+                _close_groups(ids)
+            if Model is GroupPost:
+                _drop_group_posts(ids)
+            if kind == 'track':
+                rights.track_removed(ids, reason='policy', note=reason, actor=request.user)
+        record = MassTakedown.objects.create(user=user, actor=request.user, reason=reason, items=items)
+        total = sum(len(v) for v in items.values())
+        if total:
+            notify_moderation(user, 'Content removed',
+                              f'{total} of your posts and items were removed by our moderators. Reason: {reason}')
+        log_admin_action(request.user, 'takedown_all', 'user', user.id, reason=f'{total} items — {reason}')
+        return Response({'id': record.id, 'removed': {k: len(v) for k, v in items.items()}, 'total': total})
+
+    @action(detail=True, methods=['post'], url_path='restore-all')
+    def restore_all(self, request, pk=None):
+        """POST: the latest takedown-all of this account undone — exactly the
+        items it removed, nothing taken down before for another reason."""
+        from ..models import MassTakedown
+        user, refused = self._target(request, pk, 'restore the content of')
+        if refused:
+            return refused
+        record = MassTakedown.objects.filter(user=user, restored_at__isnull=True).first()
+        if record is None:
+            return Response({'error': 'Nothing to restore.', 'code': 'nothing'}, status=status.HTTP_400_BAD_REQUEST)
+        total = 0
+        for kind, ids in (record.items or {}).items():
+            Model = _CONTENT_MODELS.get(kind)
+            if not Model:
+                continue
+            back = list(Model.objects.filter(id__in=ids, is_removed=True).values_list('id', flat=True))
+            sync_removal_likes(Model, back, False)
+            Model.objects.filter(id__in=back).update(is_removed=False)
+            if kind == 'track' and back:
+                rights.track_restored(back, actor=request.user)
+            total += len(back)
+        record.restored_at = timezone.now()
+        record.save(update_fields=['restored_at'])
+        if total:
+            notify_moderation(user, 'Content restored', f'{total} of your posts and items are back up after review.')
+        log_admin_action(request.user, 'restore_all', 'user', user.id, reason=f'{total} items')
+        return Response({'restored': total})
+
+    @action(detail=True, methods=['post'], url_path='sign-out')
+    def sign_out(self, request, pk=None):
+        """Signed out on every device now, notifications stopped (a hijacked
+        account, a lost phone). They sign in again with their password."""
+        from ..admin_security import cut_off
+        user, refused = self._target(request, pk, 'sign out')
+        if refused:
+            return refused
+        reason, refused = reason_of(request)
+        if refused:
+            return refused
+        cut_off(user, 'signed out by an admin')
+        log_admin_action(request.user, 'sign_out_user', 'user', user.id, reason=reason)
+        return Response({'status': 'signed_out'})
+
+    @action(detail=True, methods=['get'])
+    def devices(self, request, pk=None):
+        """The devices signed in to this account, by name where known."""
+        from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+        from ..models import SessionDevice
+        user = get_object_or_404(User, pk=pk)
+        rows = list(OutstandingToken.objects.filter(user=user, expires_at__gt=timezone.now(),
+                                                    blacklistedtoken__isnull=True).order_by('-created_at')[:50])
+        named = {d.jti: d for d in SessionDevice.objects.filter(jti__in=[r.jti for r in rows])}
+        return Response([{
+            'id': r.id,
+            'name': named[r.jti].name if r.jti in named else '',
+            'platform': named[r.jti].platform if r.jti in named else '',
+            'app_version': named[r.jti].app_version if r.jti in named else '',
+            'signed_in_at': named[r.jti].created_at if r.jti in named else r.created_at,
+            'last_seen_at': named[r.jti].last_seen_at if r.jti in named else r.created_at,
+        } for r in rows])
 
     @action(detail=True, methods=['post'])
     def set_role(self, request, pk=None):

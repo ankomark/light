@@ -2030,6 +2030,19 @@ export const updateProfileFields = (fields) =>
 export const forgotPassword = (email) =>
   apiRequest('post', '/auth/forgot-password/', { email });
 
+// "This wasn't me", from the new-sign-in notice: every other device signed
+// out (this one kept, with its notifications) and the admins told.
+export const reportNotMe = async () => {
+  const [refresh, device_token] = await Promise.all([
+    SecureStore.getItemAsync('refreshToken').catch(() => null), thisDeviceToken(),
+  ]);
+  return apiRequest('post', '/auth/not-me/', { refresh, device_token });
+};
+
+// Can't get in at all: a recovery case for the admins.
+export const requestAccountRecovery = (account, contactEmail, details) =>
+  apiRequest('post', '/auth/recovery-request/', { account, contact_email: contactEmail, details });
+
 export const resetPassword = (email, code, new_password) =>
   apiRequest('post', '/auth/reset-password/', { email, code, new_password });
 
@@ -2415,8 +2428,44 @@ export const clearUserProfile = (id, reason = '', fields = null) =>
 export const warnUser = (id, reason = '') =>
   apiRequest('post', `/admin/users/${id}/warn/`, { reason });
 
-export const banUser = (id, reason = '') =>
-  apiRequest('post', `/admin/users/${id}/ban/`, { reason });
+// days: a ban that ends by itself (0 or none: for good).
+export const banUser = (id, reason = '', days = 0) =>
+  apiRequest('post', `/admin/users/${id}/ban/`, { reason, days });
+
+// Everything of one account taken down at once — and that same set restored.
+export const takedownAllUser = (id, reason) =>
+  apiRequest('post', `/admin/users/${id}/takedown-all/`, { reason });
+export const restoreAllUser = (id) =>
+  apiRequest('post', `/admin/users/${id}/restore-all/`, {});
+// Signed out on every device, notifications stopped.
+export const signOutUser = (id, reason) =>
+  apiRequest('post', `/admin/users/${id}/sign-out/`, { reason });
+export const fetchUserDevices = (id) => apiRequest('get', `/admin/users/${id}/devices/`);
+
+// ── The Security Centre (admin) ──────────────────────────────────────────────
+export const fetchSecurityCentre = () => apiRequest('get', '/admin/security-centre/');
+export const fetchLoginAttempts = ({ user, ip } = {}) => apiRequest('get', `/admin/security-centre/attempts/?${
+  user ? `user=${encodeURIComponent(user)}` : `ip=${encodeURIComponent(ip || '')}`}`);
+export const blockNetwork = (network, reason, hours = 0) =>
+  apiRequest('post', '/admin/security-centre/block/', { network, reason, hours });
+export const unblockNetwork = (network) => apiRequest('post', '/admin/security-centre/unblock/', { network });
+export const resolveSecurityEvent = (id) => apiRequest('post', '/admin/security-centre/resolve/', { id });
+export const setSecurityLockdown = (changes) => apiRequest('post', '/admin/security-centre/lockdown/', changes);
+export const lockAccount = (userId, reason, hours = 24) =>
+  apiRequest('post', '/admin/security-centre/lock-account/', { user_id: userId, reason, hours });
+export const unlockAccount = (userId) =>
+  apiRequest('post', '/admin/security-centre/unlock-account/', { user_id: userId });
+// Account recovery (admin).
+export const fetchRecoveryCases = (status = 'open') =>
+  apiRequest('get', `/admin/security-centre/recovery/?status=${encodeURIComponent(status)}`);
+export const closeRecoveryCase = (id, status, note = '') =>
+  apiRequest('post', '/admin/security-centre/recovery-close/', { id, status, note });
+export const changeAccountEmail = (userId, email, reason) =>
+  apiRequest('post', '/admin/security-centre/change-email/', { user_id: userId, email, reason });
+export const sendPasswordReset = (userId) =>
+  apiRequest('post', '/admin/security-centre/send-reset/', { user_id: userId });
+export const forcePasswordReset = (userId, reason) =>
+  apiRequest('post', '/admin/security-centre/force-reset/', { user_id: userId, reason });
 
 export const unbanUser = (id) =>
   apiRequest('post', `/admin/users/${id}/unban/`);

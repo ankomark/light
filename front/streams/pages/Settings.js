@@ -340,6 +340,10 @@ const Settings = ({ route } = {}) => {
   useEffect(() => {
     if (route?.params?.search) setQuery(route.params.search);
   }, [route?.params?.search]);
+  // Sent here to change the password ("This wasn't me").
+  useEffect(() => {
+    if (route?.params?.openPassword) setPwVisible(true);
+  }, [route?.params?.openPassword]);
   const downloads = useDownloadsSummary();
 
   // Security & sessions (devices signed in), kept like the switches.

@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   fetchAdminUsers, fetchAdminByUrl, suspendUser, unsuspendUser, banUser, unbanUser, warnUser, clearUserProfile,
+  takedownAllUser, restoreAllUser, signOutUser, fetchUserDevices,
   fetchRoles, setUserSuperAdmin, assignUserRole, resetAdminTwoFactor, fetchUserHistory,
 } from '../../services/api';
 import { useAdminMe, useReasonSheet, ErrorState, StaleNote } from './AdminKit';
@@ -26,6 +27,7 @@ const AdminUsers = () => {
   const { can, superAdmin } = useAdminMe();
   const canManage = can('manage_users');
   const canBan = can('ban_users');
+  const canRemove = can('remove_content');
   const [reasonSheet, askReason] = useReasonSheet();
   const [state, setState] = useState('');
   const [failed, setFailed] = useState(false);
@@ -38,7 +40,8 @@ const AdminUsers = () => {
   const [nextUrl, setNextUrl] = useState(null);
   const [selected, setSelected] = useState(null); // user in the manage sheet
   const [busy, setBusy] = useState(false);
-  const [suspendFor, setSuspendFor] = useState(null); // user pending a suspension-duration pick
+  const [suspendFor, setSuspendFor] = useState(null); // { user, kind: 'suspend' | 'ban' } pending a length pick
+  const [devices, setDevices] = useState(null);       // { forId, rows } | { forId, failed }
   const [history, setHistory] = useState(null);       // { forId, data } | { forId, loading } | { forId, failed }
   const debounceRef = useRef(null);
 
@@ -162,15 +165,86 @@ const AdminUsers = () => {
 
   // A custom duration picker — Android's Alert only renders 3 buttons, so the
   // four duration options + Cancel can't live in an Alert.
-  const promptSuspend = () => setSuspendFor(selected);
+  const promptSuspend = () => setSuspendFor({ user: selected, kind: 'suspend' });
+  const promptBan = () => setSuspendFor({ user: selected, kind: 'ban' });
   const doSuspend = async (days) => {
+    const kind = suspendFor?.kind || 'suspend';
     setSuspendFor(null);
+    const ban = kind === 'ban';
     const reason = await askReason({
-      title: t('adminUsers.suspendTitle', { name: selected.username }),
-      confirmLabel: t('adminUsers.suspendConfirm'),
+      title: t(ban ? 'adminUsers.banTitle' : 'adminUsers.suspendTitle', { name: selected.username }),
+      confirmLabel: t(ban ? 'adminUsers.banConfirm' : 'adminUsers.suspendConfirm'),
       destructive: true,
     });
-    if (reason) run((id) => suspendUser(id, reason, days));
+    if (reason) run((id) => (ban ? banUser(id, reason, days) : suspendUser(id, reason, days)));
+  };
+
+  // Everything they have up, taken down at once (a spammer, a hijacked
+  // account) — and that same set brought back.
+  const takedownAll = async () => {
+    const reason = await askReason({
+      title: t('adminUsers.takedownAllTitle', { name: selected.username }),
+      message: t('adminUsers.takedownAllBody'),
+      confirmLabel: t('adminUsers.takedownAllConfirm'),
+      destructive: true,
+    });
+    if (!reason) return;
+    setBusy(true);
+    try {
+      const res = await takedownAllUser(selected.id, reason);
+      notify(t('common.done'), t('adminUsers.takedownAllDone', { n: res?.total || 0 }));
+      setHistory(null);
+    } catch (e) {
+      notify(t('common.error'), e?.data?.error || t('admin.actionFailedShort'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const restoreAll = async () => {
+    const ok = await confirmAction({
+      title: t('adminUsers.restoreAllTitle', { name: selected.username }),
+      message: t('adminUsers.restoreAllBody'),
+      confirmLabel: t('adminUsers.restoreAllConfirm'),
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await restoreAllUser(selected.id);
+      notify(t('common.done'), t('adminUsers.restoreAllDone', { n: res?.restored || 0 }));
+      setHistory(null);
+    } catch (e) {
+      notify(t('common.error'), e?.data?.error || t('admin.actionFailedShort'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Signed out on every device now (a hijacked account, a lost phone).
+  const signOutEverywhere = async () => {
+    const reason = await askReason({
+      title: t('adminUsers.signOutTitle', { name: selected.username }),
+      message: t('adminUsers.signOutBody'),
+      confirmLabel: t('adminUsers.signOutConfirm'),
+      destructive: true,
+    });
+    if (!reason) return;
+    setBusy(true);
+    try {
+      await signOutUser(selected.id, reason);
+      setDevices({ forId: selected.id, rows: [] });
+      notify(t('common.done'), t('adminUsers.signOutDone'));
+    } catch (e) {
+      notify(t('common.error'), e?.data?.error || t('admin.actionFailedShort'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const showDevices = async () => {
+    const forId = selected.id;
+    try {
+      setDevices({ forId, rows: await fetchUserDevices(forId) });
+    } catch {
+      setDevices({ forId, failed: true });
+    }
   };
 
   const renderItem = ({ item }) => (
@@ -268,6 +342,14 @@ const AdminUsers = () => {
                           : ` · ${t('adminUsers.suspendedIndefinitely')}`
                         : ''}
                     </Text>
+                    {!selected.is_active && (
+                      <Text style={styles.sheetMeta} testID="users-ban-meta">
+                        {selected.banned_until
+                          ? t('adminUsers.bannedUntil', { date: new Date(selected.banned_until).toLocaleDateString() })
+                          : t('adminUsers.bannedForGood')}
+                        {selected.ban_reason ? ` · ${selected.ban_reason}` : ''}
+                      </Text>
+                    )}
                   </View>
                 </View>
 
@@ -281,6 +363,12 @@ const AdminUsers = () => {
                     <Text style={styles.historyLine}>
                       {t('adminUsers.historyMore', { made: history.data.reports_made, devices: history.data.devices_signed_in, posts: history.data.posts })}
                     </Text>
+                    {Object.entries(history.data.content || {}).map(([kind, n]) => (
+                      <Text key={kind} style={styles.historyAction}>
+                        {t(`adminUsers.kind.${kind}`) === `adminUsers.kind.${kind}` ? kind : t(`adminUsers.kind.${kind}`)}
+                        {' · '}{t('adminUsers.contentCount', { up: n.up, removed: n.removed })}
+                      </Text>
+                    ))}
                     {history.data.admin_actions.slice(0, 5).map((a) => (
                       <Text key={a.id} style={styles.historyAction} numberOfLines={2}>
                         {new Date(a.created_at).toLocaleDateString()} · {a.action.replace(/_/g, ' ')} · @{a.by}{a.reason ? ` — ${a.reason}` : ''}
@@ -321,10 +409,38 @@ const AdminUsers = () => {
                 ))}
                 {selected.can_act !== false && canBan && (selected.is_active ? (
                   <SheetBtn icon="ban-outline" label={t('adminUsers.ban')} danger testID="users-ban"
-                    onPress={() => withReason('adminUsers.banTitle', 'adminUsers.banConfirm', true, banUser)} disabled={busy} />
+                    onPress={promptBan} disabled={busy} />
                 ) : (
                   <SheetBtn icon="checkmark-circle-outline" label={t('adminUsers.unban')} onPress={() => run(unbanUser)} disabled={busy} />
                 ))}
+                {/* Their devices, and signing them out of all of them. */}
+                {devices?.forId === selected.id && devices.rows ? (
+                  <View style={styles.history} testID="users-devices">
+                    <Text style={styles.historyLine}>{t('adminUsers.devicesCount', { n: devices.rows.length })}</Text>
+                    {devices.rows.map((d) => (
+                      <Text key={d.id} style={styles.historyAction} numberOfLines={1}>
+                        {d.name || t('adminUsers.unnamedDevice')}{d.platform ? ` · ${d.platform}` : ''}
+                        {' · '}{new Date(d.last_seen_at).toLocaleDateString()}
+                      </Text>
+                    ))}
+                  </View>
+                ) : (canManage || canBan) && (
+                  <SheetBtn icon="phone-portrait-outline" testID="users-devices-open"
+                    label={devices?.forId === selected.id && devices.failed ? t('adminKit.loadFailed') : t('adminUsers.devices')}
+                    onPress={showDevices} disabled={busy} />
+                )}
+                {selected.can_act !== false && (canManage || canBan) && (
+                  <SheetBtn icon="log-out-outline" label={t('adminUsers.signOut')} danger testID="users-sign-out"
+                    onPress={signOutEverywhere} disabled={busy} />
+                )}
+                {selected.can_act !== false && canRemove && (
+                  <SheetBtn icon="trash-bin-outline" label={t('adminUsers.takedownAll')} danger testID="users-takedown-all"
+                    onPress={takedownAll} disabled={busy} />
+                )}
+                {selected.can_act !== false && canRemove && history?.forId === selected.id && history.data?.can_restore_all && (
+                  <SheetBtn icon="refresh-outline" label={t('adminUsers.restoreAll')} testID="users-restore-all"
+                    onPress={restoreAll} disabled={busy} />
+                )}
                 {superAdmin && selected.two_factor_enabled && (
                   <SheetBtn icon="key-outline" label={t('adminUsers.reset2fa')} onPress={resetTwoStep} disabled={busy} testID="users-reset-2fa" />
                 )}
@@ -377,15 +493,23 @@ const AdminUsers = () => {
       <Modal visible={!!suspendFor} transparent animationType="fade" onRequestClose={() => setSuspendFor(null)}>
         <TouchableOpacity style={styles.durBackdrop} activeOpacity={1} onPress={() => setSuspendFor(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.durCard}>
-            <Text style={styles.durTitle}>{t('adminUsers.suspendTitle', { name: suspendFor?.username })}</Text>
-            <Text style={styles.durSub}>{t('admin.suspensionLength')}</Text>
-            {[
+            <Text style={styles.durTitle}>
+              {t(suspendFor?.kind === 'ban' ? 'adminUsers.banTitle' : 'adminUsers.suspendTitle', { name: suspendFor?.user?.username })}
+            </Text>
+            <Text style={styles.durSub}>{t(suspendFor?.kind === 'ban' ? 'adminUsers.banLength' : 'admin.suspensionLength')}</Text>
+            {(suspendFor?.kind === 'ban' ? [
+              { label: t('adminUsers.days', { n: 7 }), days: 7 },
+              { label: t('adminUsers.days', { n: 30 }), days: 30 },
+              { label: t('adminUsers.days', { n: 365 }), days: 365 },
+              { label: t('adminUsers.forGood'), days: 0 },
+            ] : [
               { label: t('adminUsers.days', { n: 1 }), days: 1 },
               { label: t('adminUsers.days', { n: 7 }), days: 7 },
               { label: t('adminUsers.days', { n: 30 }), days: 30 },
               { label: t('adminUsers.indefinite'), days: 0 },
-            ].map((opt) => (
-              <TouchableOpacity key={opt.label} style={styles.durBtn} onPress={() => doSuspend(opt.days)} activeOpacity={0.85}>
+            ]).map((opt) => (
+              <TouchableOpacity key={opt.label} style={styles.durBtn} onPress={() => doSuspend(opt.days)} activeOpacity={0.85}
+                testID={`users-length-${opt.days}`}>
                 <Text style={styles.durBtnText}>{opt.label}</Text>
               </TouchableOpacity>
             ))}

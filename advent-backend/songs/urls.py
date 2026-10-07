@@ -3,6 +3,7 @@ from rest_framework_nested.routers import NestedSimpleRouter
 from django.urls import path
 from .views.organizations import OrganizationViewSet
 from .views.admin_music import AdminMusicView, AdminMusicGenresView, AdminMusicPicksView
+from .views.admin_security_centre import AdminSecurityCentreViewSet
 from .views.admin_tickets import (
     AdminTicketsStats, AdminTicketsAudit, AdminTicketEvents, AdminTicketEvent, AdminTicketEventAction,
     AdminTicketTills, AdminTicketTill, AdminTicketTillAction,
@@ -63,7 +64,7 @@ from .views import (
     RevokeSessionView,
     RevokeOtherSessionsView,
     ExportDataView,
-    TestPushView,
+    TestPushView, NotMeView, RecoveryRequestView,
     AuthStatusView,
     CreatePaymentIntentView,
     StoryViewSet,
@@ -187,6 +188,8 @@ router.register(r'admin/quiz-reports', AdminQuestionReportViewSet, basename='adm
 router.register(r'admin/quiz-battles', AdminBattleViewSet, basename='admin-quiz-battles')
 router.register(r'admin/story-packs', AdminStoryPackViewSet, basename='admin-story-packs')
 router.register(r'admin/puzzle-themes', AdminPuzzleThemeViewSet, basename='admin-puzzle-themes')
+# The Security Centre: attacks seen, blocked addresses, locked accounts.
+router.register(r'admin/security-centre', AdminSecurityCentreViewSet, basename='admin-security-centre')
 router.register(r'admin/verify', AdminVerifyViewSet, basename='admin-verify')
 router.register(r'admin/broadcasts', AdminBroadcastViewSet, basename='admin-broadcasts')
 router.register(r'admin/singles', AdminSinglesViewSet, basename='admin-singles')
@@ -224,6 +227,8 @@ urlpatterns = [
     path('auth/sessions/revoke-others/', RevokeOtherSessionsView.as_view(), name='session-revoke-others'),
     path('auth/export-data/', ExportDataView.as_view(), name='export-data'),
     path('auth/test-push/', TestPushView.as_view(), name='test-push'),
+    path('auth/not-me/', NotMeView.as_view(), name='not-me'),
+    path('auth/recovery-request/', RecoveryRequestView.as_view(), name='recovery-request'),
     path('notification-preferences/', NotificationPreferenceView.as_view(), name='notification-preferences'),
     # The place the morning weather briefing is sent for.
     path('weather-place/', WeatherPlaceView.as_view(), name='weather-place'),

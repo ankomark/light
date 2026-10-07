@@ -36,6 +36,7 @@ const AdminReports = require('../AdminReports').default;
 const AdminContent = require('../AdminContent').default;
 const AdminLogs = require('../AdminLogs').default;
 const AdminMore = require('../AdminMore').default;
+const AdminSecurity = require('../AdminSecurity').default;
 
 const asAdmin = (ui, me = { is_super_admin: true, capabilities: [] }) => render(<AdminMe.Provider value={me}>{ui}</AdminMe.Provider>);
 
@@ -70,8 +71,22 @@ describe('users', () => {
     await waitFor(() => expect(screen.getByText('@mark')).toBeTruthy());
     fireEvent.press(screen.getByText('@mark'));
     fireEvent.press(screen.getByTestId('users-ban'));
+    // How long first (a ban can end by itself), then why.
+    fireEvent.press(screen.getByTestId('users-length-30'));
     await pickReason(screen, 'scam');
-    expect(mockApi.banUser).toHaveBeenCalledWith(9, 'adminKit.reason.scam');
+    expect(mockApi.banUser).toHaveBeenCalledWith(9, 'adminKit.reason.scam', 30);
+  });
+
+  test('everything of an account is taken down at once, with a reason', async () => {
+    mockApi.fetchAdminUsers.mockResolvedValue({ results: [member()] });
+    mockApi.fetchRoles.mockResolvedValue([]);
+    mockApi.takedownAllUser.mockResolvedValue({ total: 12 });
+    const screen = asAdmin(<AdminUsers />);
+    await waitFor(() => expect(screen.getByText('@mark')).toBeTruthy());
+    fireEvent.press(screen.getByText('@mark'));
+    fireEvent.press(screen.getByTestId('users-takedown-all'));
+    await pickReason(screen, 'spam');
+    expect(mockApi.takedownAllUser).toHaveBeenCalledWith(9, 'adminKit.reason.spam');
   });
 
   test('no action offered on an admin of the same rank or above', async () => {
@@ -189,4 +204,52 @@ test('more: only the tools the server allows, and a way out of admin', async () 
   await act(async () => { fireEvent.press(screen.getByTestId('admin-sign-out')); });
   expect(mockApi.endAdminSession).toHaveBeenCalled();
   expect(mockNav.navigate).toHaveBeenCalledWith('Home');
+});
+
+describe('security centre', () => {
+  const centre = (extra) => ({
+    lockdown: { signups_paused: false, strict: false },
+    day: { sign_ins: 40, failed: 12, locked: 1, signups: 3 },
+    events: [{ id: 5, kind: 'credential_stuffing', severity: 'high', ip: '10.6.6.6', detail: '20 failed', count: 2,
+      user: null, last_seen_at: '2026-10-07T10:00:00Z' }],
+    blocked: [], top_failing_ips: [], top_failing_accounts: [], ...extra,
+  });
+
+  test('an attack seen can be blocked from where it came, with a reason', async () => {
+    mockApi.fetchSecurityCentre.mockResolvedValue(centre());
+    mockApi.blockNetwork.mockResolvedValue({});
+    const screen = asAdmin(<AdminSecurity />);
+    await waitFor(() => expect(screen.getByTestId('sec-event-5')).toBeTruthy());
+    fireEvent.press(screen.getByText('adminSec.blockIp'));
+    await pickReason(screen, 'spam');
+    expect(mockApi.blockNetwork).toHaveBeenCalledWith('10.6.6.6', 'adminKit.reason.spam', 24);
+  });
+
+  test('lockdown and handled', async () => {
+    mockApi.fetchSecurityCentre.mockResolvedValue(centre());
+    mockApi.setSecurityLockdown.mockResolvedValue({});
+    mockApi.resolveSecurityEvent.mockResolvedValue({});
+    const screen = asAdmin(<AdminSecurity />);
+    await waitFor(() => expect(screen.getByTestId('sec-event-5')).toBeTruthy());
+    await act(async () => { fireEvent(screen.getByTestId('sec-signups_paused'), 'valueChange', true); });
+    expect(mockApi.setSecurityLockdown).toHaveBeenCalledWith({ signups_paused: true });
+    await act(async () => { fireEvent.press(screen.getByTestId('sec-resolve-5')); });
+    expect(mockApi.resolveSecurityEvent).toHaveBeenCalledWith(5);
+  });
+});
+
+test('a recovery case: the account moved to the email they can reach, with a reason', async () => {
+  mockApi.fetchSecurityCentre.mockResolvedValue({
+    lockdown: {}, day: { sign_ins: 0, failed: 0, locked: 0, signups: 0 }, events: [], blocked: [],
+    top_failing_ips: [], top_failing_accounts: [],
+  });
+  mockApi.fetchRecoveryCases.mockResolvedValue([{ id: 3, account: 'mark', contact_email: 'new@x.com',
+    details: 'Someone changed my password', created_at: '2026-10-07T10:00:00Z',
+    user: { id: 9, username: 'mark', email: 'old@x.com', joined: '2025-01-01T00:00:00Z', email_matches: false } }]);
+  mockApi.changeAccountEmail.mockResolvedValue({});
+  const screen = asAdmin(<AdminSecurity />);
+  await waitFor(() => expect(screen.getByTestId('sec-case-3')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('sec-case-move-3'));
+  await pickReason(screen, 'other');
+  expect(mockApi.changeAccountEmail).toHaveBeenCalledWith(9, 'new@x.com', 'adminKit.reason.other');
 });

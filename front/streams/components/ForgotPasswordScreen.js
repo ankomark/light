@@ -72,9 +72,7 @@ const ForgotPasswordScreen = () => {
           </>
         ) : (
           <>
-            <Text style={styles.subtitle}>
-              Enter the email address on your account and we'll send a reset code.
-            </Text>
+            <Text style={styles.subtitle}>{t('forgot.intro')}</Text>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>{t('auth.email')}</Text>
@@ -108,6 +106,11 @@ const ForgotPasswordScreen = () => {
           </>
         )}
 
+        {/* The email itself lost, or changed by someone else: ask a person. */}
+        <TouchableOpacity style={styles.loginLink} onPress={() => navigation.navigate('RecoveryRequest', { account: email.trim() })}
+          testID="forgot-recovery">
+          <Text style={styles.loginLinkText}>{t('forgot.cantGetIn')}</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.loginLink} onPress={() => navigation.navigate('Login')}>
           <Text style={styles.loginLinkText}>{t('forgot.backToLogin')}</Text>
         </TouchableOpacity>

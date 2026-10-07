@@ -107,20 +107,64 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
     throttle_scope = 'auth'
 
     def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
+        from .. import security
+        from ..models import LoginAttempt
+        # A ban with an end date that has passed is lifted as they sign in.
+        username = str(request.data.get('username') or '')[:150]
+        if username:
+            from django.utils import timezone as tz
+            User.objects.filter(username=username, is_active=False, banned_until__isnull=False,
+                                banned_until__lte=tz.now()).update(
+                is_active=True, ban_reason='', banned_at=None, banned_until=None)
+            # Locked after too many wrong passwords (songs/security.py): not
+            # even the right one opens it until the lock runs out — the owner
+            # can still reset their password by email.
+            left = security.login_refusal(username)
+            if left:
+                security.record_login(request, username, None, LoginAttempt.LOCKED)
+                return Response({'detail': 'Too many wrong passwords. Try again later or reset your password.',
+                                 'code': 'account_locked', 'retry_after': left},
+                                status=status.HTTP_403_FORBIDDEN)
+        def failed():
+            # Every failed sign-in is written down, and counted towards
+            # spotting a password being guessed or stolen ones being tried.
+            if not username:
+                return
+            try:
+                who = User.objects.filter(username=username).first()
+                outcome = (LoginAttempt.UNKNOWN if who is None
+                           else LoginAttempt.BANNED if not who.is_active else LoginAttempt.BAD_PASSWORD)
+                security.record_login(request, username, who, outcome)
+                security.after_failure(request, username, who)
+            except Exception:  # noqa: BLE001 — watching never breaks signing in
+                logger.exception('could not record a failed sign-in')
+
+        # A wrong password comes back as an exception, not a response.
+        from rest_framework.exceptions import AuthenticationFailed
+        from rest_framework_simplejwt.exceptions import InvalidToken
+        try:
+            response = super().post(request, *args, **kwargs)
+        except (AuthenticationFailed, InvalidToken):
+            failed()
+            raise
+        if response.status_code != 200:
+            failed()
         if response.status_code == 200:
             try:
                 from .common import notify_user
                 username = request.data.get('username')
                 user = User.objects.filter(username=username).first()
                 if user:
+                    security.record_login(request, username, user, LoginAttempt.OK)
+                    security.after_success(request, user)
                     _record_device(request, user.pk, response.data.get('refresh'))
                     # Logging back in auto-reactivates a self-deactivated account.
                     if user.is_deactivated:
                         user.is_deactivated = False
                         user.deactivated_at = None
                         user.save(update_fields=['is_deactivated', 'deactivated_at'])
-                    notify_user(user, 'security', 'New sign-in to your Adventist Life account.')
+                    from ..recovery import tell_new_sign_in
+                    tell_new_sign_in(user, str(request.headers.get('X-Device-Name') or '')[:80])
             except Exception:
                 pass  # never let alerting break login
         return response
@@ -132,9 +176,20 @@ class SignUpView(APIView):
     throttle_scope = 'auth'
 
     def post(self, request):
+        from .. import security
+        # Paused by an admin during an attack, or too many accounts from this
+        # address in the last hour (songs/security.py).
+        refused = security.signup_refusal(request)
+        if refused:
+            return Response({'error': 'New accounts cannot be made just now. Please try again later.',
+                             'code': f'signups_{refused}'}, status=status.HTTP_403_FORBIDDEN)
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
+            try:
+                security.after_signup(request, user)
+            except Exception:  # noqa: BLE001 — watching never breaks signing up
+                logger.exception('could not check a new sign-up')
             # Account is created regardless; a failed verification email can be
             # resent later (and verification is gated off until SMTP is ready).
             #
@@ -310,6 +365,10 @@ class ResetPasswordView(APIView):
         # A reset is how someone takes their account back: whoever else was
         # signed in to it is signed out, and their phones stop getting its pushes.
         _revoke_other_sessions(user, all_devices=True)
+        from ..recovery import security_email
+        security_email(user.email, 'Your password was reset',
+                       f'Hi {user.username},\n\nYour password was just reset with a code sent to this email, and '
+                       "every device was signed out. If this wasn't you, ask us for help from the sign-in screen.")
         return Response({'message': 'Password reset successfully. Please log in with your new password.'})
 
 
@@ -396,6 +455,11 @@ class ChangePasswordView(APIView):
         # in when it supplies its refresh token.
         revoked = _revoke_other_sessions(request.user, keep_jti=_refresh_jti(request.data.get('refresh')),
                                          keep_device=_device_token(request))
+        from ..recovery import security_email
+        security_email(request.user.email, 'Your password was changed',
+                       f'Hi {request.user.username},\n\nThe password of your account was just changed and other '
+                       "devices were signed out. If this wasn't you, reset your password now with \"Forgot "
+                       'password" on the sign-in screen, or ask us for help from there.')
         return Response({'message': 'Password updated successfully.', 'sessions_revoked': revoked})
 
 
@@ -717,6 +781,61 @@ class DeleteAccountView(APIView):
         if files:
             run_in_background(purge, sorted(files))
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class NotMeView(APIView):
+    """POST /auth/not-me/ {refresh, device_token}: the owner, warned of a new
+    sign-in, says it was not them. Every other device is signed out now and
+    stops getting the account's notifications, the admins are told, and the
+    app takes them to a new password (someone else knows the old one)."""
+    permission_classes = [IsAuthenticated]
+    throttle_scope = 'account_leave'
+
+    def post(self, request):
+        from .. import security
+        from ..admin_security import client_ip
+        revoked = _revoke_other_sessions(request.user, keep_jti=_refresh_jti(request.data.get('refresh')),
+                                         keep_device=_device_token(request))
+        security.raise_event('account_takeover', f'@{request.user.username} says a sign-in was not them; '
+                             f'{revoked} other session(s) signed out.', ip=client_ip(request) or '',
+                             user=request.user, severity='high')
+        return Response({'revoked': revoked, 'next': 'change_password'})
+
+
+class RecoveryRequestView(APIView):
+    """POST /auth/recovery-request/ {account, contact_email, details}: someone
+    who cannot get in at all asks for help. Always the same answer — whether
+    an account matched is not said — and a case for the admins."""
+    permission_classes = [AllowAny]
+    throttle_scope = 'password_reset'
+
+    def post(self, request):
+        from django.core.validators import validate_email
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from ..admin_security import client_ip
+        from ..models import RecoveryCase
+        account = str(request.data.get('account') or '').strip().lstrip('@')[:254]
+        contact = str(request.data.get('contact_email') or '').strip()[:254]
+        details = str(request.data.get('details') or '').strip()[:2000]
+        if not account or len(details) < 20:
+            return Response({'error': 'Tell us the account and what happened (a few sentences).',
+                             'code': 'too_short'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_email(contact)
+        except DjangoValidationError:
+            return Response({'error': 'An email we can reach you at.', 'code': 'bad_email'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        user = (User.objects.filter(username__iexact=account).first()
+                or User.objects.filter(email__iexact=account).first())
+        case = RecoveryCase.objects.create(user=user, account=account, contact_email=contact, details=details,
+                                           ip=client_ip(request) or '')
+        try:
+            from ..admin_alerts import alert
+            alert(f'recovery:{case.pk}', f'Account recovery asked for "{account}". See the Security centre.')
+        except Exception:  # noqa: BLE001
+            pass
+        return Response({'message': 'We have your request. We will email you at the address you gave.'},
+                        status=status.HTTP_201_CREATED)
 
 
 class AuthStatusView(APIView):

@@ -91,10 +91,16 @@ class JoiningTests(Base):
         unverified = member('unverified')
         User.objects.filter(pk=unverified.pk).update(is_email_verified=False)
         suspended = member('suspended', is_suspended=True)
-        for who, code in ((unverified, singles.NOT_VERIFIED), (suspended, singles.SUSPENDED)):
-            self.client.force_authenticate(User.objects.get(pk=who.pk))
-            r = self.join()
-            self.assertEqual((r.status_code, r.data['blockers']), (403, [code]))
+        self.client.force_authenticate(User.objects.get(pk=unverified.pk))
+        r = self.join()
+        self.assertEqual((r.status_code, r.data['blockers']), (403, [singles.NOT_VERIFIED]))
+        # A suspended account is refused every write by the app-wide rule
+        # (songs/account_limits.py) before Singles is asked; its own reasons
+        # still come with the profile it reads.
+        self.client.force_authenticate(User.objects.get(pk=suspended.pk))
+        r = self.join()
+        self.assertEqual((r.status_code, r.json()['code']), (403, 'suspended'))
+        self.assertIn(singles.SUSPENDED, self.client.get(ME).data['blockers'])
 
     def test_unverified_email_is_fine_while_the_app_does_not_ask_for_it(self):
         # No mail server yet: the app treats everyone as verified, and so does

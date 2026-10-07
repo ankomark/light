@@ -207,6 +207,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'role', 'capabilities',
             'is_active', 'is_suspended', 'is_currently_suspended',
             'suspension_reason', 'suspended_at', 'suspended_until', 'strikes',
+            'ban_reason', 'banned_at', 'banned_until',
             'is_email_verified', 'is_superuser',
             'posts_count', 'followers_count', 'profile_picture', 'date_joined',
             'can_act', 'two_factor_enabled', 'profile_text',

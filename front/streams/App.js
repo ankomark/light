@@ -155,6 +155,9 @@ import AdminPuzzleThemes from './components/admin/AdminPuzzleThemes';
 import AdminMusic from './components/admin/AdminMusic';
 import AdminVerify from './components/admin/AdminVerify';
 import AdminAppControl from './components/admin/AdminAppControl';
+import AdminSecurity from './components/admin/AdminSecurity';
+import SecurityCheck from './pages/SecurityCheck';
+import RecoveryRequest from './pages/RecoveryRequest';
 import AdminBroadcast from './components/admin/AdminBroadcast';
 import AdminSingles from './components/admin/AdminSingles';
 import AdminTickets from './components/admin/AdminTickets';
@@ -377,6 +380,9 @@ const App = () => {
       } else if (data?.type === 'market_wish' && data.slug) {
         // A wishlisted item came down in price or back in stock: that item.
         navigate('ProductDetail', { slug: data.slug });
+      } else if (data?.type === 'security_sign_in') {
+        // "New sign-in": was it you?
+        navigate('SecurityCheck', { device: data.device, at: data.at });
       } else if (data?.type === 'puzzle_challenge' && data.puzzle) {
         // A friend finished the puzzle you sent: that board, side by side.
         navigate('PuzzlePlay', { puzzleId: data.puzzle, versus: data.from, nonce: Date.now() });
@@ -582,6 +588,9 @@ const App = () => {
                 <Stack.Screen name="AdminMusic" component={AdminMusicWrapper} />
                 <Stack.Screen name="AdminVerify" component={AdminVerifyWrapper} />
                 <Stack.Screen name="AdminAppControl" component={AdminAppControlWrapper} />
+                <Stack.Screen name="AdminSecurity" component={AdminSecurityWrapper} />
+                <Stack.Screen name="SecurityCheck" component={SecurityCheck} options={{ headerShown: false }} />
+                <Stack.Screen name="RecoveryRequest" component={RecoveryRequest} options={{ headerShown: false }} />
                 <Stack.Screen name="AdminBroadcast" component={AdminBroadcastWrapper} />
                 <Stack.Screen name="AdminSingles" component={AdminSinglesWrapper} />
                 <Stack.Screen name="AdminTickets" component={AdminTicketsWrapper} />
@@ -1122,6 +1131,7 @@ const AdminPuzzleThemesWrapper = adminWrap(AdminPuzzleThemes);
 const AdminMusicWrapper = adminWrap(AdminMusic);
 const AdminVerifyWrapper = adminWrap(AdminVerify);
 const AdminAppControlWrapper = adminWrap(AdminAppControl);
+const AdminSecurityWrapper = adminWrap(AdminSecurity);
 const AdminBroadcastWrapper = adminWrap(AdminBroadcast);
 const AdminSinglesWrapper = adminWrap(AdminSingles);
 const AdminTicketsWrapper = adminWrap(AdminTickets);

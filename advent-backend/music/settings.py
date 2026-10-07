@@ -179,6 +179,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # Must be before any other middleware that uses request.is_secure()
     'django.middleware.security.SecurityMiddleware',
+    # Addresses an admin (or the attack rules) blocked: refused first thing.
+    'songs.security.BlockMiddleware',
     # Compress JSON responses. The feed page is ~20 posts of deeply nested JSON
     # with long R2 URLs repeated across rows — it compresses ~80%, which is the
     # single biggest latency win on a phone network. GZipMiddleware only acts
@@ -200,6 +202,8 @@ MIDDLEWARE = [
     'songs.admin_security.AdminRequestMiddleware',
     # Maintenance mode (Settings > admin): members wait, admins carry on.
     'songs.app_settings.MaintenanceMiddleware',
+    # A suspended account can read but not write, across the whole API.
+    'songs.account_limits.SuspensionMiddleware',
 ]
 
 # Admin tools need a two-step admin session (an authenticator code) on top of
