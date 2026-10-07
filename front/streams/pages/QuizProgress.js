@@ -14,6 +14,7 @@ import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import useCachedData from '../utils/useCachedData';
 import { userKey } from '../utils/screenCache';
+import { gameNow } from '../utils/quizCache';
 import {
   quizStyles as q, DISPLAY, DISPLAY_MID, SERIF_BOLD, GOLD, GOLD_DEEP, PARCHMENT, MUTED,
 } from './quizTheme';
@@ -26,7 +27,7 @@ const BADGE_ICONS = {
 };
 
 /** Twelve weeks, Monday first, ending with this week: [[{date, …}×7]×12]. */
-export const calendarWeeks = (days, today = new Date()) => {
+export const calendarWeeks = (days, today = gameNow()) => {
   const byDate = new Map((days || []).map((d) => [String(d.date), d]));
   const first = startOfWeek(subWeeks(today, WEEKS - 1), { weekStartsOn: 1 });
   const todayIso = format(today, 'yyyy-MM-dd');

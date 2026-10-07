@@ -21,6 +21,9 @@ REVIEW = 'review'
 SECTION = 'section'
 # Another player's Speed run, played on the same questions.
 DUEL = 'duel'
+# One Bible story at a time — Joseph, Daniel, the Passion week (StoryPack);
+# the packs in order are the journey.
+STORY = 'story'
 # The modes played for a personal best (the hub's cards).
 BEST_MODES = (SPEED, STREAK)
 
@@ -106,6 +109,14 @@ MODES[SECTION] = {
 }
 
 MODES[DUEL] = {**MODES[SPEED], 'label': 'Duel', 'mix': []}
+
+MODES[STORY] = {**MODES[SECTION], 'label': 'Story'}
+
+# "How does this verse end?": how many of a run's simple questions are drawn
+# from the verses people know by heart. Not in Speed (long choices against
+# a clock) nor in a Section or Story, which keep to their own chapters.
+MODES[DAILY]['famous'] = 2
+MODES[STREAK]['famous'] = 2
 
 MODE_CHOICES = tuple((key, cfg['label']) for key, cfg in MODES.items())
 

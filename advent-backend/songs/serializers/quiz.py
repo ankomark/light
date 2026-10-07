@@ -1,8 +1,10 @@
+from django.core.cache import cache
 from django.db.models import Count
 
 from .common import *  # noqa: F401,F403
 
 from ..models import DailyQuiz, QuizAttempt, QuizQuestion, QuizSession
+from ..quiz import display_order, questions_cache_key
 
 
 class QuizQuestionSerializer(serializers.ModelSerializer):
@@ -25,13 +27,45 @@ class QuizQuestionSerializer(serializers.ModelSerializer):
 
 
 class DailyQuizSerializer(serializers.ModelSerializer):
-    questions = QuizQuestionSerializer(many=True, read_only=True)
+    """A day's quiz, as one person sees it.
+
+    The questions are the same for everyone, so they are read once and kept
+    (questions_cache_key) — the morning push sends everyone here at once.
+    Each person's choices then come in their own order (display_order), and
+    `shuffled` tells the app that answers are to be sent in that order.
+    """
+    questions = serializers.SerializerMethodField()
     my_attempt = serializers.SerializerMethodField()
     counts = serializers.SerializerMethodField()
+    shuffled = serializers.SerializerMethodField()
 
     class Meta:
         model = DailyQuiz
-        fields = ['id', 'date', 'language', 'questions', 'my_attempt', 'counts']
+        fields = ['id', 'date', 'language', 'theme', 'shuffled', 'questions', 'my_attempt', 'counts']
+
+    QUESTIONS_CACHE_SECONDS = 24 * 60 * 60
+
+    def _user_id(self):
+        request = self.context.get('request')
+        return request.user.pk if request and request.user.is_authenticated else None
+
+    def get_shuffled(self, obj):
+        return self._user_id() is not None
+
+    def get_questions(self, obj):
+        key = questions_cache_key(obj.pk)
+        canonical = cache.get(key)
+        if canonical is None:
+            canonical = [dict(q) for q in QuizQuestionSerializer(obj.questions.all(), many=True).data]
+            cache.set(key, canonical, self.QUESTIONS_CACHE_SECONDS)
+        user_id = self._user_id()
+        if user_id is None:
+            return canonical
+        out = []
+        for q in canonical:
+            order = display_order(user_id, q['id'], q['kind'], len(q['choices']))
+            out.append({**q, 'choices': [q['choices'][i] for i in order]})
+        return out
 
     def get_my_attempt(self, obj):
         """Their attempt, with its review once it exists.
@@ -55,16 +89,26 @@ class DailyQuizSerializer(serializers.ModelSerializer):
         return {d: found.get(d, 0) for d, _ in QuizQuestion.DIFFICULTY_CHOICES}
 
 
+def shown_index(user_id, question, index):
+    """Where original choice `index` of `question` sits in `user_id`'s order."""
+    if index is None:
+        return None
+    order = display_order(user_id, question.pk, question.kind, len(question.choices))
+    return order.index(index) if 0 <= index < len(order) else None
+
+
 def review_for(attempt):
     """The per-question review of a daily attempt, from its stored answers —
-    the same shape the submit response gives, less the points breakdown."""
+    the same shape the submit response gives, less the points breakdown, with
+    every index in the order this person was shown the choices."""
     rows = (attempt.answer_rows.select_related('question')
             .order_by('question__order', 'question_id'))
+    uid = attempt.user_id
     return [
         {
             'question_id': r.question_id,
-            'chosen_index': r.chosen_index,
-            'answer_index': r.question.answer_index,
+            'chosen_index': shown_index(uid, r.question, r.chosen_index),
+            'answer_index': shown_index(uid, r.question, r.question.answer_index),
             'correct': r.is_correct,
             'reference': r.question.reference,
             'explanation': r.question.explanation,

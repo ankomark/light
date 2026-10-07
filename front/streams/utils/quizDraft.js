@@ -16,14 +16,16 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY = 'quiz:draft';
+// Per account: on a shared phone, one person's half-played quiz must never
+// restore into the next person's.
+const keyFor = (userId) => `quiz:draft:${userId || 'anon'}`;
 
 /** Save the run in progress. Failures are swallowed: a draft that cannot be
  *  written must never interrupt the quiz it is protecting. */
-export const saveDraft = async (date, draft) => {
+export const saveDraft = async (date, draft, userId) => {
   if (!date) return;
   try {
-    await AsyncStorage.setItem(KEY, JSON.stringify({ date, ...draft }));
+    await AsyncStorage.setItem(keyFor(userId), JSON.stringify({ date, ...draft }));
   } catch {
     // Storage full or unavailable — play on.
   }
@@ -31,13 +33,13 @@ export const saveDraft = async (date, draft) => {
 
 /** The draft for `date`, or null. A draft from another day is discarded rather
  *  than returned, so stale answers can never attach to new questions. */
-export const loadDraft = async (date) => {
+export const loadDraft = async (date, userId) => {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await AsyncStorage.getItem(keyFor(userId));
     if (!raw) return null;
     const draft = JSON.parse(raw);
     if (!draft || draft.date !== date) {
-      await clearDraft();
+      await clearDraft(userId);
       return null;
     }
     return draft;
@@ -46,9 +48,9 @@ export const loadDraft = async (date) => {
   }
 };
 
-export const clearDraft = async () => {
+export const clearDraft = async (userId) => {
   try {
-    await AsyncStorage.removeItem(KEY);
+    await AsyncStorage.removeItem(keyFor(userId));
   } catch {
     // ignore
   }

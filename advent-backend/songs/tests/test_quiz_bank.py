@@ -22,9 +22,11 @@ from songs.tests.test_quiz import seed_corpus
 
 class SeedTests(APITestCase):
     def test_the_starting_set_is_loaded_and_sound(self):
+        from songs.quiz_bank_seed_more import SEED_EN, SEED_SW
         bank = BankQuestion.objects.filter(language='en')
-        self.assertEqual(bank.count(), len(SEED))
-        for b in bank:
+        self.assertEqual(bank.count(), len(SEED) + len(SEED_EN))
+        self.assertEqual(BankQuestion.objects.filter(language='sw').count(), len(SEED_SW))
+        for b in BankQuestion.objects.all():
             b.full_clean()                                        # choices and answer valid
             self.assertEqual(len(set(b.choices)), len(b.choices), b.prompt)
             self.assertTrue(b.explanation, b.prompt)
@@ -92,7 +94,7 @@ class RecordTests(APITestCase):
         quiz = DailyQuiz.objects.get()
         written = {q.id: q for q in quiz.questions.filter(bank_question__isnull=False)}
         answers = {str(q['id']): (written[q['id']].answer_index if q['id'] in written else 0) for q in questions}
-        self.client.post('/api/quiz/submit/', {'answers': answers}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': answers}, format='json')
         for q in written.values():
             b = BankQuestion.objects.get(pk=q.bank_question_id)
             self.assertEqual((b.times_asked, b.times_correct), (1, 1))
@@ -107,12 +109,27 @@ class RecordTests(APITestCase):
                          {'question_id': written.id, 'choice': written.answer_index, 'seconds': 3}, format='json')
         self.assertEqual(BankQuestion.objects.get(pk=written.bank_question_id).times_correct, 1)
 
-    def test_nearly_everyone_right_retires_it_as_too_easy(self):
-        b = BankQuestion.objects.first()
+    def test_nearly_everyone_right_on_a_simple_one_retires_it_as_too_easy(self):
+        b = BankQuestion.objects.filter(difficulty='simple').first()
         record_bank_answers([(b.pk, True)] * RETIRE_AFTER)
         b.refresh_from_db()
         self.assertFalse(b.is_active)
         self.assertEqual(b.retired_reason, BankQuestion.TOO_EASY)
+
+    def test_too_easy_for_its_level_moves_it_down_a_level(self):
+        b = BankQuestion.objects.filter(difficulty='hard').first()
+        record_bank_answers([(b.pk, True)] * RETIRE_AFTER)
+        b.refresh_from_db()
+        self.assertTrue(b.is_active)
+        self.assertEqual((b.difficulty, b.calibrated_from), ('moderate', 'hard'))
+        self.assertEqual(b.times_asked, 0)            # a fresh count at its new level
+
+    def test_too_hard_for_its_level_moves_it_up_a_level(self):
+        b = BankQuestion.objects.filter(difficulty='simple').first()
+        record_bank_answers([(b.pk, i % 4 == 0) for i in range(RETIRE_AFTER)])   # 25% right
+        b.refresh_from_db()
+        self.assertTrue(b.is_active)
+        self.assertEqual((b.difficulty, b.calibrated_from), ('moderate', 'simple'))
 
     def test_nearly_everyone_wrong_retires_it_to_check_the_answer(self):
         b = BankQuestion.objects.first()
@@ -134,7 +151,7 @@ class RecordTests(APITestCase):
 
     def test_the_review_teaches_and_points_to_the_verse(self):
         questions = self.client.get('/api/quiz/today/').data['questions']
-        res = self.client.post('/api/quiz/submit/', {'answers': {str(q['id']): 0 for q in questions}}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {str(q['id']): 0 for q in questions}}, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         quiz = DailyQuiz.objects.get()
         written_ids = set(quiz.questions.filter(bank_question__isnull=False).values_list('id', flat=True))

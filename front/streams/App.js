@@ -107,6 +107,7 @@ import GroupList from './pages/GroupList';
 import BibleQuiz from './pages/BibleQuiz';
 import QuizHome from './pages/QuizHome';
 import QuizProgress from './pages/QuizProgress';
+import QuizStories from './pages/QuizStories';
 import BattleScreen from './pages/BattleScreen';
 // The quiz's own backdrop (the Word Puzzle's picture), for the hub and progress too.
 import { Backdrop as QuizBackdrop } from './pages/quizTheme';
@@ -149,6 +150,7 @@ import AdminTabs from './components/admin/AdminTabs';
 import AdminMore from './components/admin/AdminMore';
 import { PULSE } from './components/admin/PulseCharts';
 import AdminQuizBank from './components/admin/AdminQuizBank';
+import AdminQuizCenter from './components/admin/AdminQuizCenter';
 import AdminPuzzleThemes from './components/admin/AdminPuzzleThemes';
 import AdminMusic from './components/admin/AdminMusic';
 import AdminVerify from './components/admin/AdminVerify';
@@ -539,6 +541,7 @@ const App = () => {
                 <Stack.Screen name="BibleQuiz" component={BibleQuiz} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizHome" component={QuizHomeWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizProgress" component={QuizProgressWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="QuizStories" component={QuizStoriesWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="Battle" component={BattleScreen} options={{ headerShown: false }} />
                 <Stack.Screen name="QuizPlay" component={QuizPlay} options={{ headerShown: false }} />
                 <Stack.Screen name="PuzzlePlay" component={PuzzlePlayWrapper} options={{ headerShown: false }} />
@@ -573,6 +576,7 @@ const App = () => {
                 <Stack.Screen name="AdminRoles" component={AdminRolesWrapper} />
                 <Stack.Screen name="AdminWallpapers" component={AdminWallpapersWrapper} />
                 <Stack.Screen name="AdminQuizBank" component={AdminQuizBankWrapper} />
+                <Stack.Screen name="AdminQuizCenter" component={AdminQuizCenterWrapper} />
                 <Stack.Screen name="AdminPuzzleThemes" component={AdminPuzzleThemesWrapper} />
                 <Stack.Screen name="AdminMusic" component={AdminMusicWrapper} />
                 <Stack.Screen name="AdminVerify" component={AdminVerifyWrapper} />
@@ -653,6 +657,16 @@ const QuizProgressWrapper = ({ navigation, route }) => (
     <Header navigation={navigation} transparentBg />
     <ErrorBoundary fallbackMessage="Your progress couldn't load.">
       <QuizProgress navigation={navigation} route={route} />
+    </ErrorBoundary>
+  </View>
+);
+
+const QuizStoriesWrapper = ({ navigation, route }) => (
+  <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+    <QuizBackdrop />
+    <Header navigation={navigation} transparentBg />
+    <ErrorBoundary fallbackMessage="The stories couldn't load.">
+      <QuizStories navigation={navigation} route={route} />
     </ErrorBoundary>
   </View>
 );
@@ -1100,6 +1114,7 @@ const adminWrap = (Screen) => ({ navigation, route }) => (
 const AdminDashboardWrapper = adminWrap(AdminDashboard);
 const AdminMoreWrapper = adminWrap(AdminMore);
 const AdminQuizBankWrapper = adminWrap(AdminQuizBank);
+const AdminQuizCenterWrapper = adminWrap(AdminQuizCenter);
 const AdminPuzzleThemesWrapper = adminWrap(AdminPuzzleThemes);
 const AdminMusicWrapper = adminWrap(AdminMusic);
 const AdminVerifyWrapper = adminWrap(AdminVerify);

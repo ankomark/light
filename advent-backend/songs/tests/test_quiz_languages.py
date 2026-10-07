@@ -17,6 +17,8 @@ from songs.quiz import SWAHILI, corpus_for, generate_for_date
 from songs.streaks import forget_recorded_plays
 from songs.tests.test_quiz import seed_corpus
 
+SW_VARIED = ['mlima', 'mto', 'mchungaji', 'bustani', 'hekalu', 'mavuno', 'shamba',
+             'mtumishi', 'nabii', 'ufalme', 'jangwa', 'chemchemi']
 SW_NAMES = {'Genesis': 'Mwanzo', 'Psalms': 'Zaburi', 'Proverbs': 'Methali', 'John': 'Yohana', 'Acts': 'Matendo'}
 
 
@@ -32,7 +34,8 @@ def seed_swahili(chapters=12, verses=30):
                 rows.append(BibleText(
                     version='swh_bib', book=name, book_number=book['number'], chapter=ch, verse=v,
                     text=(f'Ikawa katika {name} sura {ch} mstari {v} watu wakakusanyika '
-                          f'kando ya maji wakalibariki agano la milele daima.'),
+                          f'kando ya {SW_VARIED[(ch * 5 + v) % 12]} wakalibariki '
+                          f'{SW_VARIED[(ch * 5 + v + 5) % 12]} la milele daima.'),
                 ))
     BibleText.objects.bulk_create(rows, ignore_conflicts=True)
 
@@ -101,8 +104,9 @@ class SwahiliQuizTests(APITestCase):
         english_books = set(SW_NAMES)
         for q in generated:
             # Every prompt in Swahili, every reference a Swahili book name.
-            if q.kind == 'reference':
-                self.assertTrue(q.prompt.startswith('Mstari huu unatoka sura gani ya '), q.prompt)
+            if '{book}' in SWAHILI.prompts[q.kind]:
+                book = q.reference.rsplit(' ', 1)[0]
+                self.assertEqual(q.prompt, SWAHILI.prompt(q.kind, book=book), q.prompt)
             else:
                 self.assertEqual(q.prompt, SWAHILI.prompts[q.kind])
             self.assertIn(q.reference.split(' ')[0], SW_NAMES.values(), q.reference)
@@ -123,9 +127,9 @@ class SwahiliQuizTests(APITestCase):
     def test_once_a_day_whichever_language(self):
         questions = self.client.get('/api/quiz/today/?lang=sw').data['questions']
         res = self.client.post('/api/quiz/submit/',
-                               {'answers': {str(q['id']): 0 for q in questions}, 'language': 'sw'}, format='json')
+                               {'shuffled': False, 'answers': {str(q['id']): 0 for q in questions}, 'language': 'sw'}, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content[:200])
-        again = self.client.post('/api/quiz/submit/', {'answers': {}, 'language': 'en'}, format='json')
+        again = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}, 'language': 'en'}, format='json')
         self.assertEqual(again.data['code'], 'already_played')
         # Asking for English now brings back the Swahili quiz that was played, with its review.
         today = self.client.get('/api/quiz/today/?lang=en').data

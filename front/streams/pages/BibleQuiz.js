@@ -13,7 +13,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
-  Animated, PanResponder,
+  Animated, PanResponder, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -33,6 +33,7 @@ import {
 import BottomSheet from '../components/BottomSheet';
 import ShareCardSheet from '../components/ShareCardSheet';
 import WhySheet from '../components/WhySheet';
+import ReportQuestionSheet from '../components/ReportQuestionSheet';
 import QuizResultCard, { resultMessage } from '../components/QuizResultCard';
 import useReducedMotion from '../utils/useReducedMotion';
 import { parseReference } from '../utils/dailyVerseText';
@@ -142,6 +143,12 @@ const BibleQuiz = ({ navigation }) => {
 
   // "Why?" on a reviewed question: which one is open.
   const [whyFor, setWhyFor] = useState(null);
+  // "Something's wrong with this question": which one, and which were sent.
+  const [reportFor, setReportFor] = useState(null);
+  const [reported, setReported] = useState({});
+  // A small phone: the score medal shrinks to fit beside the board.
+  const { width: winW } = useWindowDimensions();
+  const medal = winW < 360 ? 0.82 : 1;
 
   // Sharing the result, and a word when something happened (copied, saved).
   const [sharing, setSharing] = useState(false);
@@ -163,11 +170,11 @@ const BibleQuiz = ({ navigation }) => {
     startedAt.current = Date.now();
     if (data?.my_attempt) {
       // Already played: nothing to restore, and any draft is spent.
-      clearDraft();
+      clearDraft(currentUser?.id);
       loadBoard();
     } else {
       // Pick up an interrupted run rather than losing the day's one attempt.
-      const draft = await loadDraft(data?.date);
+      const draft = await loadDraft(data?.date, currentUser?.id);
       if (draft) {
         setAnswers(draft.answers || {});
         setIndex(Math.min(draft.index || 0, (data.questions?.length || 1) - 1));
@@ -175,7 +182,7 @@ const BibleQuiz = ({ navigation }) => {
         if (draft.elapsed) startedAt.current = Date.now() - draft.elapsed * 1000;
       }
     }
-  }, [loadBoard]);
+  }, [loadBoard, currentUser?.id]);
 
   const load = useCallback(async () => {
     setError('');
@@ -190,7 +197,7 @@ const BibleQuiz = ({ navigation }) => {
       setLoading(true);
     }
     try {
-      const fresh = await fetchDailyQuiz(undefined, lang);
+      const fresh = await fetchDailyQuiz(undefined, lang, { play: true });
       writeCache(dailyKey, fresh);
       if (!usable || fresh.date !== kept.date) {
         await adopt(fresh);
@@ -330,7 +337,7 @@ const BibleQuiz = ({ navigation }) => {
         index,
         spent: spent.current,
         elapsed: Math.round((Date.now() - startedAt.current) / 1000),
-      });
+      }, currentUser?.id);
       return updated;
     });
   };
@@ -360,12 +367,16 @@ const BibleQuiz = ({ navigation }) => {
       Object.entries(answers).forEach(([id, choice]) => {
         payload[id] = { choice, seconds: Number((spent.current[id] || 0).toFixed(1)) };
       });
-      const res = await submitDailyQuiz(payload, seconds, quiz?.language || lang);
+      // The day it was opened on (a quiz begun before midnight is still that
+      // day's), and whether the choices were in this person's own order.
+      const res = await submitDailyQuiz(payload, seconds, quiz?.language || lang, {
+        date: quiz?.date, shuffled: quiz?.shuffled === true,
+      });
       setOutcome(res);
       // The kept copy now says "played", with the review, so reopening the
       // quiz — or the hub — shows the result rather than the questions.
       writeCache(dailyKey, withAttempt(quiz, res, seconds));
-      clearDraft();
+      clearDraft(currentUser?.id);
       finishFeedback();
       loadBoard();
     } catch (e) {
@@ -373,7 +384,7 @@ const BibleQuiz = ({ navigation }) => {
       if (code === 'already_played') {
         // Played on another phone: show that result instead of an error.
         setError('');
-        clearDraft();
+        clearDraft(currentUser?.id);
         load();
         return;
       }
@@ -453,20 +464,25 @@ const BibleQuiz = ({ navigation }) => {
     return (
       <View style={styles.root}>
         <Backdrop />
-        <SafeAreaView style={styles.flex} edges={['top']}>
+        <SafeAreaView style={styles.flex} edges={['top', 'bottom']}>
           <ScrollView contentContainerStyle={styles.resultScroll} showsVerticalScrollIndicator={false}>
 
             <View style={styles.resultHead}>
               <Text style={styles.eyebrow}>{formatQuizDay(quiz?.date)}</Text>
               <Text style={styles.resultTitle}>{t('quiz.title')}</Text>
+              {!!quiz?.theme && <ThemeChip theme={quiz.theme} t={t} />}
             </View>
 
-            <View style={[styles.medallionOuter, perfect && styles.medallionPerfect]}>
-              <View style={[styles.medallionInner, perfect && styles.medallionInnerPerfect]}
+            <View style={[styles.medallionOuter, perfect && styles.medallionPerfect,
+              medal !== 1 && { width: 182 * medal, height: 182 * medal, borderRadius: 91 * medal }]}>
+              <View style={[styles.medallionInner, perfect && styles.medallionInnerPerfect,
+                medal !== 1 && { width: 150 * medal, height: 150 * medal, borderRadius: 75 * medal }]}
                     accessible accessibilityLabel={`${score} / ${total}. ${t(`quiz.band.${band}`)}`}>
                 <View style={styles.scoreRow}>
-                  <Text style={styles.scoreValue}>{outcome && shownScore != null ? shownScore : score}</Text>
-                  <Text style={styles.scoreOf}>/{total}</Text>
+                  <Text style={styles.scoreValue} maxFontSizeMultiplier={1.15}>
+                    {outcome && shownScore != null ? shownScore : score}
+                  </Text>
+                  <Text style={styles.scoreOf} maxFontSizeMultiplier={1.15}>/{total}</Text>
                 </View>
                 <Text style={[styles.eyebrow, styles.bandLabel]}>{t(`quiz.band.${band}`)}</Text>
               </View>
@@ -536,6 +552,16 @@ const BibleQuiz = ({ navigation }) => {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+
+              {boardPeriod === 'week' && !!board?.champion && (
+                <View style={styles.champion} testID="board-champion">
+                  <Ionicons name="trophy" size={16} color={GOLD} />
+                  <Text style={styles.championText} numberOfLines={1}>
+                    {t('quiz.board.champion', { name: board.champion.user?.username })}
+                  </Text>
+                  <Coins value={board.champion.points} size={17} textSize={13} />
+                </View>
+              )}
 
               {!board ? (
                 <ActivityIndicator color={GOLD} style={styles.boardLoading} />
@@ -618,6 +644,20 @@ const BibleQuiz = ({ navigation }) => {
                         <Ionicons name="bulb-outline" size={13} color={GOLD} />
                         <Text style={styles.readLinkText}>{t('quiz.why.button')}</Text>
                       </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.readLink}
+                        onPress={() => setReportFor(q.id)}
+                        disabled={!!reported[q.id]}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t('quiz.report.button')}: ${i + 1}`}
+                        testID={`report-link-${q.id}`}
+                      >
+                        <Ionicons name={reported[q.id] ? 'flag' : 'flag-outline'} size={13} color={MUTED} />
+                        <Text style={styles.reportLinkText}>
+                          {reported[q.id] ? t('quiz.report.sent') : t('quiz.report.button')}
+                        </Text>
+                      </TouchableOpacity>
                       {!!place(r?.reference) && (
                         <TouchableOpacity
                           style={styles.readLink}
@@ -669,6 +709,13 @@ const BibleQuiz = ({ navigation }) => {
           onClose={() => setWhyFor(null)}
           questionId={whyFor}
           lang={quiz?.language || lang}
+        />
+
+        <ReportQuestionSheet
+          visible={!!reportFor}
+          onClose={() => setReportFor(null)}
+          questionId={reportFor}
+          onDone={() => setReported((prev) => ({ ...prev, [reportFor]: true }))}
         />
 
         {!!toast && (
@@ -767,10 +814,13 @@ const BibleQuiz = ({ navigation }) => {
         </View>
 
         <View style={styles.metaRow}>
-          <View style={[styles.difficultyChip, { backgroundColor: tint.bg }]}>
-            <Text style={[styles.difficultyText, { color: tint.fg }]}>
-              {t(`quiz.difficulty.${current?.difficulty}`)}
-            </Text>
+          <View style={styles.metaLeft}>
+            <View style={[styles.difficultyChip, { backgroundColor: tint.bg }]}>
+              <Text style={[styles.difficultyText, { color: tint.fg }]}>
+                {t(`quiz.difficulty.${current?.difficulty}`)}
+              </Text>
+            </View>
+            {!!quiz?.theme && <ThemeChip theme={quiz.theme} t={t} small />}
           </View>
           <View style={styles.timerBox}>
             <Ionicons name="time-outline" size={14} color={GOLD} />
@@ -894,8 +944,33 @@ const BibleQuiz = ({ navigation }) => {
   );
 };
 
+/** The day's theme: Monday the Gospels … Saturday the verses known by heart. */
+export const ThemeChip = ({ theme, t, small }) => (
+  <View style={[styles.themeChip, small && styles.themeChipSmall]} testID="quiz-theme">
+    <Ionicons name={theme === 'famous' ? 'heart' : 'bookmark'} size={small ? 10 : 12} color={GOLD} />
+    <Text style={[styles.themeText, small && styles.themeTextSmall]} numberOfLines={1}>
+      {t(`quiz.theme.${theme}`)}
+    </Text>
+  </View>
+);
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0A1628' },
+  metaLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  themeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'center', marginTop: 8,
+    paddingHorizontal: 10, height: 24, borderRadius: 12, backgroundColor: 'rgba(244,162,97,0.12)',
+  },
+  themeChipSmall: { marginTop: 0, height: 22, paddingHorizontal: 8, flexShrink: 1 },
+  themeText: { fontFamily: DISPLAY_MID, fontSize: 10.5, letterSpacing: 0.8, color: GOLD, textTransform: 'uppercase' },
+  themeTextSmall: { fontSize: 9.5 },
+  champion: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 12, minHeight: 40,
+    borderRadius: 12, backgroundColor: 'rgba(244,162,97,0.10)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.4)',
+  },
+  championText: { flex: 1, fontSize: 13, color: PARCHMENT },
+  reportLinkText: { fontSize: 12.5, color: MUTED },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.sm },
   grow: { flex: 1 },

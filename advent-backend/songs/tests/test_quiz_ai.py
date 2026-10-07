@@ -32,7 +32,7 @@ class WhyTests(APITestCase):
         self.q = self.questions[0]
 
     def play(self):
-        self.client.post('/api/quiz/submit/', {'answers': {str(q['id']): 0 for q in self.questions}}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {str(q['id']): 0 for q in self.questions}}, format='json')
 
     def why(self, level='why', **extra):
         return self.client.post('/api/quiz/why/', {'question_id': self.q['id'], 'level': level, **extra}, format='json')
@@ -57,7 +57,7 @@ class WhyTests(APITestCase):
             self.why()
             other = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
             self.client.force_authenticate(other)
-            self.client.post('/api/quiz/submit/', {'answers': {str(q['id']): 0 for q in self.questions}}, format='json')
+            self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {str(q['id']): 0 for q in self.questions}}, format='json')
             res = self.why()
         self.assertEqual(ask.call_count, 1)
         self.assertTrue(res.data['cached'])

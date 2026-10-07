@@ -12,7 +12,9 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
+from .days import local_today
 from .models import QuizQuestion, ReviewItem
+from .quiz import FIXED_ORDER_KINDS
 
 # Days until the next ask, after a miss (step 0) and after each right answer.
 INTERVALS = [1, 3, 7, 14, 30]
@@ -35,7 +37,7 @@ def _key(question):
 def note_miss(user, question, language='en', today=None):
     """A wrong (or skipped) answer: into review, due tomorrow — or, if it was
     already there, back to the start."""
-    today = today or timezone.localdate()
+    today = today or local_today()
     due = today + timedelta(days=INTERVALS[0])
     item, created = ReviewItem.objects.get_or_create(
         user=user, source_key=_key(question),
@@ -54,7 +56,7 @@ def note_miss(user, question, language='en', today=None):
 def note_review(item_id, correct, today=None):
     """An answer in a Review run: out to the next interval, mastered after the
     last, or back to the start on a miss."""
-    today = today or timezone.localdate()
+    today = today or local_today()
     item = ReviewItem.objects.filter(pk=item_id).first()
     if not item:
         return
@@ -70,7 +72,7 @@ def note_review(item_id, correct, today=None):
 
 
 def due_items(user, language='en', today=None):
-    today = today or timezone.localdate()
+    today = today or local_today()
     return ReviewItem.objects.filter(
         user=user, language=language, mastered_at__isnull=True, due_on__lte=today,
     )
@@ -78,7 +80,7 @@ def due_items(user, language='en', today=None):
 
 def due_count(user, language=None, today=None):
     qs = ReviewItem.objects.filter(
-        user=user, mastered_at__isnull=True, due_on__lte=today or timezone.localdate(),
+        user=user, mastered_at__isnull=True, due_on__lte=today or local_today(),
     )
     return qs.filter(language=language).count() if language else qs.count()
 
@@ -99,7 +101,7 @@ def start_review(user, language='en'):
         rows = []
         for i, item in enumerate(items):
             order = list(range(len(item.choices)))
-            if item.kind != 'true_false':
+            if item.kind not in FIXED_ORDER_KINDS:     # yes/no keeps its order
                 rng.shuffle(order)
             rows.append(QuizQuestion(
                 session=session, order=i, kind=item.kind, difficulty=item.difficulty,

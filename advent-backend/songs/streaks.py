@@ -8,8 +8,8 @@ every game records the day it was played on and the streak is read from that.
 Recording is a `get_or_create` on (user, date) — at most one row a day, and
 safe to call on every move rather than trying to guess the first one.
 """
-from django.utils import timezone
 
+from .days import local_today
 from .models import PlayDay
 
 
@@ -30,7 +30,7 @@ def record_play(user, when=None):
     if not user_id:
         return
 
-    day = when or timezone.localdate()
+    day = when or local_today()
     if _RECORDED.get(user_id) == day:
         return
 
@@ -84,7 +84,7 @@ def day_streaks(dates_desc, today):
 
 def streak_for(user, today=None):
     """(current, best, played_today) for one person, across all games."""
-    today = today or timezone.localdate()
+    today = today or local_today()
     days = list(PlayDay.objects.filter(user=user)
                 .order_by('-date').values_list('date', flat=True))
     current, best = day_streaks(days, today)

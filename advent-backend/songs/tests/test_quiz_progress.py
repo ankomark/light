@@ -137,7 +137,7 @@ class StrengthAndHistoryTests(ProgressBase):
     def _play_today(self):
         questions = self.client.get('/api/quiz/today/').data['questions']
         self.client.post('/api/quiz/submit/',
-                         {'answers': {str(q['id']): 0 for q in questions}}, format='json')
+                         {'shuffled': False, 'answers': {str(q['id']): 0 for q in questions}}, format='json')
         return questions
 
     def test_strengths_cover_every_answer_in_canon_order(self):

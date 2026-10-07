@@ -11,6 +11,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, F, Max, Q
 from django.utils import timezone
 
+from .days import local_today
 from .models import CoinSpend, PlayDay, QuizAnswer, QuizAttempt, QuizSession
 from .modes import STREAK
 from .quiz import CATEGORY_RANGES
@@ -34,7 +35,7 @@ def freeze_offer(user, today=None, balance=None):
     when yesterday was missed, the day before was played, and no freeze was
     used in the last week.
     """
-    today = today or timezone.localdate()
+    today = today or local_today()
     yesterday = today - timedelta(days=1)
     days = set(PlayDay.objects.filter(user=user, date__gte=today - timedelta(days=400))
                .values_list('date', flat=True))
@@ -77,7 +78,7 @@ def buy_freeze(user, today=None):
     changes nothing when it cannot be bought. Two taps at once cannot buy it
     twice: the play day is unique per person and date.
     """
-    today = today or timezone.localdate()
+    today = today or local_today()
     offer = freeze_offer(user, today)
     if not offer['available']:
         raise FreezeRefused('not_available')
@@ -174,7 +175,7 @@ CALENDAR_DAYS = 84     # twelve weeks
 
 def progress_for(user, today=None):
     """Everything the progress screen shows, in one answer."""
-    today = today or timezone.localdate()
+    today = today or local_today()
     attempts = (QuizAttempt.objects.filter(user=user, quiz__date__gte=today - timedelta(days=HISTORY_DAYS))
                 .select_related('quiz').order_by('quiz__date'))
     days = (PlayDay.objects.filter(user=user, date__gte=today - timedelta(days=CALENDAR_DAYS))

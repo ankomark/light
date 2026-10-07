@@ -2973,6 +2973,9 @@ class DailyQuiz(models.Model):
     # language's Bible (English from the KJV, Swahili from BibleText). A person
     # still plays once a day, in whichever they choose.
     language = models.CharField(max_length=5, default='en', db_index=True)
+    # The day's theme (songs/quiz.py DAY_THEMES): a part of scripture a share
+    # of the questions is drawn from, so each weekday has a character.
+    theme = models.CharField(max_length=20, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -2995,7 +2998,10 @@ class QuizQuestion(models.Model):
         ('book', 'Which book'),
         ('blank', 'Missing word'),
         ('reference', 'Which reference'),
+        ('section', 'Which chapters'),
         ('order', 'Which comes first'),
+        ('finish', 'Finish the verse'),
+        ('exact', 'Quoted exactly?'),
         # From the question bank (BankQuestion), written rather than generated.
         ('who_said', 'Who said this'),
         ('true_false', 'True or false'),
@@ -3092,6 +3098,8 @@ class BankQuestion(models.Model):
     TOO_EASY, TOO_HARD = 'too_easy', 'too_hard'
     RETIRED_CHOICES = ((TOO_EASY, 'Almost everyone got it right'),
                        (TOO_HARD, 'Almost everyone got it wrong — check the answer'))
+    WRITTEN, AI = 'written', 'ai'
+    ORIGIN_CHOICES = ((WRITTEN, 'Written by a person'), (AI, 'Drafted by Claude'))
 
     kind = models.CharField(max_length=12, choices=KIND_CHOICES)
     language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default='en', db_index=True)
@@ -3111,6 +3119,13 @@ class BankQuestion(models.Model):
     retired_reason = models.CharField(max_length=12, choices=RETIRED_CHOICES, blank=True, default='')
     times_asked = models.PositiveIntegerField(default=0)
     times_correct = models.PositiveIntegerField(default=0)
+    # Drafted by Claude from a passage: off and waiting until a person has
+    # read it and switched it on (songs/quiz_drafts.py). Never asked before.
+    origin = models.CharField(max_length=8, choices=ORIGIN_CHOICES, default=WRITTEN)
+    needs_review = models.BooleanField(default=False, db_index=True)
+    # The difficulty it was written at, when the answers moved it to another
+    # (songs/quiz.py record_bank_answers) — blank while it is where it began.
+    calibrated_from = models.CharField(max_length=10, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -3335,6 +3350,9 @@ class QuizSession(models.Model):
     # same order, so the two can be compared answer by answer.
     duel_of = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
                                 related_name='duels')
+    # What a Section or Story run was about: the part of scripture, or the
+    # story pack's slug — so a story's best can be read back for the journey.
+    topic = models.CharField(max_length=40, blank=True, default='', db_index=True)
     # Filled in as the run proceeds — a session is scored answer by answer, not
     # in one submission at the end, because Streak has to know immediately.
     score = models.PositiveSmallIntegerField(default=0)
@@ -3352,6 +3370,98 @@ class QuizSession(models.Model):
 
     def __str__(self):
         return f"{self.user.username} · {self.mode} · {self.points} pts"
+
+
+class DailyQuizStart(models.Model):
+    """When someone first opened a day's quiz, kept until they submit.
+
+    The speed bonus is reckoned from times the app reports, which an app can
+    under-report. The server's own clock bounds them: twenty answers cannot
+    together have taken less time than had passed since the quiz was opened
+    to play (songs/scoring.py settle_times). Also what lets a quiz opened
+    just before midnight be handed in just after it.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='quiz_starts')
+    quiz = models.ForeignKey(DailyQuiz, on_delete=models.CASCADE, related_name='starts')
+    # The first time the quiz was fetched at all (the hub preloads it).
+    first_seen = models.DateTimeField(auto_now_add=True)
+    # The first time it was opened on the quiz screen itself, to play.
+    play_started_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('user', 'quiz')
+
+    def __str__(self):
+        return f"{self.user_id} opened {self.quiz_id}"
+
+
+class StoryPack(models.Model):
+    """A Bible story to be quizzed on by itself — Joseph, Daniel, the Passion
+    week. A run of a pack draws every question from its chapters; packs in
+    order make the journey, each opened by a star on the one before.
+
+    Rows, not code, so an admin can add one — this week's Sabbath School
+    passage, a youth camp's theme — without a release."""
+    slug = models.SlugField(max_length=40, unique=True)
+    title = models.CharField(max_length=80)
+    title_sw = models.CharField(max_length=80, blank=True, default='')
+    summary = models.CharField(max_length=200, blank=True, default='')
+    summary_sw = models.CharField(max_length=200, blank=True, default='')
+    book_number = models.PositiveSmallIntegerField()
+    chapter_start = models.PositiveSmallIntegerField()
+    chapter_end = models.PositiveSmallIntegerField()
+    icon = models.CharField(max_length=40, blank=True, default='book-outline')
+    order = models.PositiveSmallIntegerField(default=0, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    # Shown first on the hub ("This week's study") — at most one is meant to be.
+    is_featured = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['order', 'id']
+
+    def __str__(self):
+        return self.title
+
+
+class QuestionReport(models.Model):
+    """A player saying a question is wrong — the wrong answer marked, unclear,
+    a typo. A copy of the question is kept: practice questions are pruned
+    after a week and the report must outlive them."""
+    WRONG_ANSWER, UNCLEAR, TYPO, OTHER = 'wrong_answer', 'unclear', 'typo', 'other'
+    REASON_CHOICES = ((WRONG_ANSWER, 'The marked answer is wrong'), (UNCLEAR, 'Unclear or ambiguous'),
+                      (TYPO, 'Spelling or text error'), (OTHER, 'Something else'))
+    OPEN, FIXED, DISMISSED = 'open', 'fixed', 'dismissed'
+    STATUS_CHOICES = ((OPEN, 'Open'), (FIXED, 'Fixed'), (DISMISSED, 'Dismissed'))
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='question_reports')
+    question = models.ForeignKey(QuizQuestion, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='reports')
+    bank_question = models.ForeignKey(BankQuestion, on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name='reports')
+    kind = models.CharField(max_length=12, blank=True, default='')
+    language = models.CharField(max_length=5, default='en')
+    prompt = models.TextField()
+    passage = models.TextField(blank=True, default='')
+    choices = models.JSONField(default=list)
+    answer_index = models.PositiveSmallIntegerField(default=0)
+    reference = models.CharField(max_length=80, blank=True, default='')
+    reason = models.CharField(max_length=14, choices=REASON_CHOICES)
+    note = models.CharField(max_length=500, blank=True, default='')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=OPEN, db_index=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'question'], condition=models.Q(question__isnull=False),
+                                    name='questionreport_once_per_user'),
+        ]
+
+    def __str__(self):
+        return f"{self.reason}: {self.prompt[:40]}"
 
 
 class QuizReminder(models.Model):

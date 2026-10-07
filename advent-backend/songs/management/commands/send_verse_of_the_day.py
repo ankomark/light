@@ -15,6 +15,8 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from songs.days import local_today
+
 from songs.devotion import verse_for_date
 from songs.models import DeviceToken, NotificationPreference, VerseSend
 from songs.push import notify_user
@@ -54,7 +56,7 @@ class Command(BaseCommand):
             ))
             return
 
-        today = timezone.localdate()
+        today = local_today()
         verse = verse_for_date(today)
         if not verse:
             self.stderr.write('No verse available — has the Bible been imported?')

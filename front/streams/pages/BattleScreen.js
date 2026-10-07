@@ -238,7 +238,7 @@ const BattleScreen = ({ navigation, route }) => {
     body = (
       <View style={styles.center}>
         <Text style={q.eyebrow}>{t('battle.codeLabel')}</Text>
-        <Text style={styles.code} accessibilityLabel={code.split('').join(' ')}>{code}</Text>
+        <Text style={styles.code} maxFontSizeMultiplier={1.2} adjustsFontSizeToFit numberOfLines={1} accessibilityLabel={code.split('').join(' ')}>{code}</Text>
         <TouchableOpacity style={styles.shareBtn} onPress={share} accessibilityRole="button">
           <Ionicons name="share-social" size={15} color={GOLD} />
           <Text style={styles.shareText}>{t('battle.invite')}</Text>

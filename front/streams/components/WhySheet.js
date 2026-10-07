@@ -3,7 +3,7 @@
 // simply, or for a child. Each is fetched once and kept while the app is open;
 // the server keeps them for everyone.
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import { askQuizWhy } from '../services/api';
@@ -85,6 +85,18 @@ export default function WhySheet({ visible, onClose, questionId, lang = 'en', re
         ) : (
           <>
             <Text style={styles.text} accessibilityLiveRegion="polite">{state.text}</Text>
+            {/* For a parent reading it to a child, a teacher to a class: send it on. */}
+            {!!state.text && (
+              <TouchableOpacity
+                style={styles.share}
+                onPress={() => Share.share({ message: `${state.text}\n\n— ${t('quiz.why.sharedFrom')}` }).catch(() => {})}
+                accessibilityRole="button"
+                testID="why-share"
+              >
+                <Ionicons name="share-social-outline" size={15} color={GOLD} />
+                <Text style={styles.shareText}>{t('quiz.why.share')}</Text>
+              </TouchableOpacity>
+            )}
             <Text style={styles.note}>{t('quiz.why.note')}</Text>
           </>
         )}
@@ -108,5 +120,10 @@ const styles = StyleSheet.create({
   loading: { marginTop: 24 },
   text: { fontFamily: 'Lora_400Regular', fontSize: 16, lineHeight: 26, color: PARCHMENT },
   note: { fontSize: 11.5, lineHeight: 17, color: MUTED },
+  share: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', minHeight: 40,
+    paddingHorizontal: 14, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: GOLD,
+  },
+  shareText: { fontSize: 13, color: GOLD, fontWeight: '700' },
   error: { fontSize: 14, lineHeight: 21, color: '#A9BCD0', textAlign: 'center', marginTop: 16 },
 });

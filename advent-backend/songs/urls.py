@@ -106,6 +106,11 @@ from .views import (
     AdminRoleViewSet,
     AdminSecurityViewSet,
     AdminQuizBankViewSet,
+    AdminBattleViewSet,
+    AdminQuestionReportViewSet,
+    AdminQuizDailyView,
+    AdminQuizStatsView,
+    AdminStoryPackViewSet,
     AdminPuzzleThemeViewSet,
     AdminVerifyViewSet,
     AdminBroadcastViewSet,
@@ -178,6 +183,9 @@ router.register(r'admin/appeals', AdminAppealViewSet, basename='admin-appeals')
 router.register(r'admin/roles', AdminRoleViewSet, basename='admin-roles')
 router.register(r'admin/security', AdminSecurityViewSet, basename='admin-security')
 router.register(r'admin/quiz-bank', AdminQuizBankViewSet, basename='admin-quiz-bank')
+router.register(r'admin/quiz-reports', AdminQuestionReportViewSet, basename='admin-quiz-reports')
+router.register(r'admin/quiz-battles', AdminBattleViewSet, basename='admin-quiz-battles')
+router.register(r'admin/story-packs', AdminStoryPackViewSet, basename='admin-story-packs')
 router.register(r'admin/puzzle-themes', AdminPuzzleThemeViewSet, basename='admin-puzzle-themes')
 router.register(r'admin/verify', AdminVerifyViewSet, basename='admin-verify')
 router.register(r'admin/broadcasts', AdminBroadcastViewSet, basename='admin-broadcasts')
@@ -223,6 +231,8 @@ urlpatterns = [
     path('daily-verse/', DailyVerseView.as_view(), name='daily-verse'),
     path('profiles/update_me/', ProfileViewSet.as_view({'patch': 'update_me'}), name='profile-update-me'),
     path('admin/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
+    path('admin/quiz-daily/', AdminQuizDailyView.as_view(), name='admin-quiz-daily'),
+    path('admin/quiz-stats/', AdminQuizStatsView.as_view(), name='admin-quiz-stats'),
     path('app-status/', AppStatusView.as_view(), name='app-status'),
     path('admin/app-settings/', AdminAppSettingsView.as_view(), name='admin-app-settings'),
     path('admin/users/<int:pk>/history/', AdminUserHistoryView.as_view(), name='admin-user-history'),

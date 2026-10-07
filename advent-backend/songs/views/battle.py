@@ -25,6 +25,11 @@ class BattleViewSet(viewsets.GenericViewSet):
     """POST /quiz-battles/ host · POST join/ · GET <code>/ · POST <code>/start|answer|reveal|next/"""
     permission_classes = [IsAuthenticated]
     lookup_field = 'code'
+    # Joining is by a six-letter code: a rate keeps the codes from being
+    # walked, and every create builds ten questions.
+    throttle_scope = 'quiz'
+    # Battles one person may host in a day — a youth night is one or two.
+    HOSTED_PER_DAY = 12
 
     def get_object(self):
         battle = Battle.objects.filter(code=str(self.kwargs['code']).upper()).select_related('host').first()
@@ -33,6 +38,11 @@ class BattleViewSet(viewsets.GenericViewSet):
         return battle
 
     def create(self, request):
+        from ..days import local_day_start
+        hosted = Battle.objects.filter(host=request.user, created_at__gte=local_day_start()).count()
+        if hosted >= self.HOSTED_PER_DAY:
+            return Response({'error': 'That is enough battles for today.', 'code': 'too_many'},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
         try:
             seconds = int(request.data.get('seconds') or 20)
         except (TypeError, ValueError):

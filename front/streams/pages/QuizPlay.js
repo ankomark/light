@@ -10,7 +10,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Share, Animated,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Share, Animated, AppState,
 } from 'react-native';
 import useReducedMotion from '../utils/useReducedMotion';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +23,9 @@ import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import { quizLanguage } from '../utils/quizCache';
 import WhySheet from '../components/WhySheet';
+import ReportQuestionSheet from '../components/ReportQuestionSheet';
+import { enqueueAnswer, flushAnswers } from '../utils/answerQueue';
+import { loadOfflinePack, offlineRun } from '../utils/offlinePack';
 import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS } from '../utils/preferences';
 import {
@@ -55,6 +58,15 @@ export const challengeLink = (mode, username, score, runId) => {
 };
 
 const DUEL_REFUSALS = ['own_duel', 'already_played', 'gone', 'not_ready', 'not_found'];
+
+/** A story's stars from a run of ten: three for all ten, two for eight, one for six. */
+export const storyStars = (score) => (score >= 10 ? 3 : score >= 8 ? 2 : score >= 6 ? 1 : 0);
+
+/** No reply at all, or the server's own failure: worth sending again later. */
+const undelivered = (e) => {
+  const code = e?.response?.status ?? e?.status;
+  return !code || code >= 500;
+};
 
 /** A duel's two sides, answer by answer. */
 const DuelCard = ({ duel, t }) => {
@@ -92,13 +104,18 @@ const DuelCard = ({ duel, t }) => {
 const QuizPlay = ({ navigation, route }) => {
   const { t, resolvedLanguage } = useI18n();
   const { preferences, setPreference } = usePreferences();
-  const MODES_PLAYED = ['speed', 'streak', 'review', 'section', 'duel'];
+  const MODES_PLAYED = ['speed', 'streak', 'review', 'section', 'duel', 'story', 'offline'];
   const mode = MODES_PLAYED.includes(route?.params?.mode) ? route.params.mode : 'speed';
   const category = mode === 'section' ? route?.params?.category : undefined;
   const duelOf = mode === 'duel' ? route?.params?.of : undefined;
+  const story = mode === 'story' ? route?.params?.story : undefined;
+  // Played on the phone from the kept pack: nothing goes to the server.
+  const offline = mode === 'offline';
   const [duel, setDuel] = useState(null);
-  // What the run is called on screen: the section's own name, else the mode's.
-  const title = (label) => (category ? t(`quiz.section.${category}`) : t(`quiz.mode.${mode}`) || label);
+  // What the run is called on screen: the section's or story's own name, else the mode's.
+  const title = (label) => (category ? t(`quiz.section.${category}`)
+    : story && route?.params?.title ? route.params.title
+    : t(`quiz.mode.${mode}`) || label);
   const { currentUser } = useAuth();
   const lang = quizLanguage(resolvedLanguage);
   const challenge = challengeFrom(route?.params);
@@ -121,6 +138,14 @@ const QuizPlay = ({ navigation, route }) => {
   const [feedback, setFeedback] = useState(null);   // the verdict on the question shown
   const [remaining, setRemaining] = useState(null); // speed mode only
   const [whyOpen, setWhyOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reported, setReported] = useState({});
+  // Today's practice has paid all it can (the server's daily ceiling).
+  const [capped, setCapped] = useState(false);
+  // The run could not start, but a pack kept for offline play is on the phone.
+  const [canPlayOffline, setCanPlayOffline] = useState(false);
+  // Set once leaving is decided, so the guard on going back lets it through.
+  const leaving = useRef(false);
   // 50/50 on the question shown: the choices taken away, and how the buying went.
   const [hint, setHint] = useState({ qid: null, removed: [], busy: false, error: '' });
   const reduceMotion = useReducedMotion();
@@ -147,7 +172,18 @@ const QuizPlay = ({ navigation, route }) => {
       setOver(false);
       setShowResults(false);
       chain.current = Promise.resolve();
-      const started = await startQuizSession(mode, lang, { category, of: duelOf });
+      setCapped(false);
+      setCanPlayOffline(false);
+      let started;
+      if (offline) {
+        const pack = await loadOfflinePack(lang);
+        if (!pack) { setError(t('quiz.offline.none')); return; }
+        started = offlineRun(pack, t('quiz.mode.offline'));
+      } else {
+        // Anything a weak connection held back last time goes first.
+        await flushAnswers(currentUser?.id, sendQueued).catch(() => {});
+        started = await startQuizSession(mode, lang, { category, of: duelOf, story });
+      }
       setRun(started);
       setQi(0);
       setTotals({
@@ -162,12 +198,15 @@ const QuizPlay = ({ navigation, route }) => {
     } catch (e) {
       const code = e?.response?.data?.code || e?.data?.code;
       setError(code === 'nothing_due' ? t('quiz.reviewNothingDue')
+        : code === 'locked' ? t('quiz.story.locked')
         : DUEL_REFUSALS.includes(code) ? t(`quiz.duel.${code}`)
         : t('quiz.loadFailed'));
+      // No connection: offer the pack kept for exactly this.
+      if (!offline && undelivered(e)) setCanPlayOffline(!!(await loadOfflinePack(lang)));
     } finally {
       setLoading(false);
     }
-  }, [mode, t, lang, category, duelOf]);
+  }, [mode, t, lang, category, duelOf, story, offline, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A duel's results are the two runs side by side, once this one is in.
   useEffect(() => {
@@ -203,11 +242,19 @@ const QuizPlay = ({ navigation, route }) => {
   // coins (and, if it ever disagrees, its verdict) replace the app's when
   // they arrive; a failed send is tried once more, then left — the run goes on.
   const record = useCallback((qid, choice, seconds) => {
+    if (offline) return;                       // played on the phone, kept nowhere
     const post = () => answerQuizSession(run.id, qid, choice, seconds, { brief: true });
     chain.current = chain.current
-      .then(() => post().catch(() => post()))
+      .then(() => post().catch(() => post()).catch((e) => {
+        // Twice without a reply: written down and sent when the line is back.
+        if (undelivered(e)) {
+          return enqueueAnswer(currentUser?.id, { runId: run.id, questionId: qid, choice, seconds }).then(() => null);
+        }
+        return null;
+      }))
       .then((res) => {
         if (!res) return;
+        if (res.capped) setCapped(true);
         setPoints(res.session?.points ?? 0);
         setTotals((cur) => (cur ? {
           ...cur,
@@ -219,7 +266,19 @@ const QuizPlay = ({ navigation, route }) => {
           : f));
       })
       .catch(() => { /* offline: the run carries on; results show what the server has */ });
-  }, [run]);
+  }, [run, offline, currentUser?.id]);
+
+  // Sends one held-back answer (see utils/answerQueue).
+  const sendQueued = useCallback((a) => answerQuizSession(a.runId, a.questionId, a.choice, a.seconds, { brief: true }), []);
+
+  // Back to the front with a connection again: what was held back goes now.
+  useEffect(() => {
+    if (offline) return undefined;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') flushAnswers(currentUser?.id, sendQueued).catch(() => {});
+    });
+    return () => sub?.remove?.();
+  }, [offline, currentUser?.id, sendQueued]);
 
   const send = useCallback(async (choice) => {
     if (feedback || !question || !run) return;
@@ -254,7 +313,10 @@ const QuizPlay = ({ navigation, route }) => {
     });
     const streak = correct ? (totals?.streak || 0) + 1 : 0;
     const answered = (totals?.answered || 0) + 1;
-    const ends = (config.ends_on_wrong && !correct) || answered >= (run.questions?.length || 0);
+    // A resumed run carries only the questions left, while `answered` counts
+    // from its start: the run's own total is what it ends at.
+    const total = totals?.total_questions || run.total_questions || run.questions?.length || 0;
+    const ends = (config.ends_on_wrong && !correct) || answered >= total;
     setTotals((cur) => ({
       ...cur,
       answered,
@@ -323,6 +385,7 @@ const QuizPlay = ({ navigation, route }) => {
     if (over) {
       // The results are the server's: let the last answers land first.
       await chain.current;
+      if (!offline) await flushAnswers(currentUser?.id, sendQueued).catch(() => {});
       setShowResults(true);
       return;
     }
@@ -333,23 +396,43 @@ const QuizPlay = ({ navigation, route }) => {
     setRemaining(limit ?? null);
   };
 
-  const quit = () => {
-    if (finished || !run) { navigation.goBack(); return; }
+  // `action`: the navigation that was held back (a swipe or the Android back
+  // button) — let through once leaving is confirmed.
+  const quit = (action) => {
+    const go = () => { leaving.current = true; if (action) navigation.dispatch(action); else navigation.goBack(); };
+    if (finished || !run) { go(); return; }
     Alert.alert(t('quiz.quitTitle'), t('quiz.quitBody'), [
       { text: t('common.cancel'), style: 'cancel' },
       {
         text: t('quiz.quitConfirm'),
         style: 'destructive',
         onPress: async () => {
-          try {
-            await chain.current;
-            await finishQuizSession(run.id);
-          } catch { /* leaving anyway */ }
-          navigation.goBack();
+          if (!offline) {
+            try {
+              await chain.current;
+              await finishQuizSession(run.id);
+            } catch { /* leaving anyway */ }
+          }
+          go();
         },
       },
     ]);
   };
+
+  // A back swipe or the Android back button mid-run asks first, as the close
+  // button does — a run walked out of by a stray gesture is a run lost.
+  const quitRef = useRef(quit);
+  quitRef.current = quit;
+  const guard = useRef({ finished, run });
+  guard.current = { finished, run };
+  useEffect(() => {
+    if (!navigation?.addListener) return undefined;
+    return navigation.addListener('beforeRemove', (e) => {
+      if (leaving.current || guard.current.finished || !guard.current.run) return;
+      e.preventDefault();
+      quitRef.current(e.data.action);
+    });
+  }, [navigation]);
 
   // ── loading / error ───────────────────────────────────────────────────────
   if (loading) {
@@ -373,6 +456,13 @@ const QuizPlay = ({ navigation, route }) => {
             <TouchableOpacity style={q.primaryBtn} onPress={begin} activeOpacity={0.85}>
               <Text style={q.primaryBtnText}>{t('common.retry')}</Text>
             </TouchableOpacity>
+            {canPlayOffline && (
+              <TouchableOpacity style={q.ghostBtn} activeOpacity={0.85} accessibilityRole="button"
+                                testID="play-offline"
+                                onPress={() => navigation.replace?.('QuizPlay', { mode: 'offline' })}>
+                <Text style={q.ghostBtnText}>{t('quiz.offline.play')}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </SafeAreaView>
       </View>
@@ -400,12 +490,21 @@ const QuizPlay = ({ navigation, route }) => {
             <Text style={styles.overTitle}>
               {isStreak ? t('quiz.runEnded')
                 : mode === 'review' ? t('quiz.reviewDone')
-                : mode === 'section' ? t('quiz.sectionDone')
+                : mode === 'section' || mode === 'story' || offline ? t('quiz.sectionDone')
                 : t('quiz.timeUp')}
             </Text>
 
+            {mode === 'story' && (
+              <View style={styles.stars} accessible accessibilityLabel={t('quiz.story.stars', { count: storyStars(session.score) })}
+                    testID="story-stars">
+                {[1, 2, 3].map((n) => (
+                  <Ionicons key={n} name={storyStars(session.score) >= n ? 'star' : 'star-outline'} size={30} color={GOLD} />
+                ))}
+              </View>
+            )}
+
             <View style={styles.hero}>
-              <Text style={styles.heroValue}>
+              <Text style={styles.heroValue} maxFontSizeMultiplier={1.15}>
                 {isStreak ? session.longest_streak : session.score}
               </Text>
               <Text style={q.eyebrow}>
@@ -431,6 +530,12 @@ const QuizPlay = ({ navigation, route }) => {
             </View>
 
             {mode === 'duel' && <DuelCard duel={duel} t={t} />}
+
+            {(capped || offline) && (
+              <Text style={styles.cappedNote} testID="coins-note">
+                {offline ? t('quiz.offline.noCoins') : t('quiz.capped')}
+              </Text>
+            )}
 
             {!!challenge && mode !== 'duel' && (
               <View style={[styles.challengeVerdict, mine > challenge.score && styles.verdictWon]}
@@ -581,7 +686,7 @@ const QuizPlay = ({ navigation, route }) => {
             </Animated.View>
           )}
 
-          {!answered && question.choices.length >= 3 && (
+          {!answered && !offline && question.choices.length >= 3 && (
             <View style={styles.hintRow}>
               <TouchableOpacity
                 style={[styles.hintBtn, (removed.length > 0 || hint.busy) && styles.hintBtnOff]}
@@ -661,14 +766,30 @@ const QuizPlay = ({ navigation, route }) => {
               </View>
               <Text style={styles.reference}>{feedback.reference}</Text>
               <Text style={styles.explanation}>{feedback.explanation}</Text>
-              <TouchableOpacity
-                style={styles.whyBtn}
-                onPress={() => setWhyOpen(true)}
-                accessibilityRole="button"
-              >
-                <Ionicons name="bulb-outline" size={15} color={GOLD} />
-                <Text style={styles.whyText}>{t('quiz.why.button')}</Text>
-              </TouchableOpacity>
+              {!offline && (
+                <View style={styles.feedbackLinks}>
+                  <TouchableOpacity
+                    style={styles.whyBtn}
+                    onPress={() => setWhyOpen(true)}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="bulb-outline" size={15} color={GOLD} />
+                    <Text style={styles.whyText}>{t('quiz.why.button')}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.whyBtn}
+                    onPress={() => setReportOpen(true)}
+                    disabled={!!reported[feedback.qid]}
+                    accessibilityRole="button"
+                    testID="report-question"
+                  >
+                    <Ionicons name={reported[feedback.qid] ? 'flag' : 'flag-outline'} size={15} color={MUTED} />
+                    <Text style={styles.reportText}>
+                      {reported[feedback.qid] ? t('quiz.report.sent') : t('quiz.report.button')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
         </ScrollView>
@@ -692,6 +813,13 @@ const QuizPlay = ({ navigation, route }) => {
         questionId={feedback?.qid}
         lang={run?.language || lang}
         ready={() => chain.current}
+      />
+      <ReportQuestionSheet
+        visible={reportOpen}
+        onClose={() => setReportOpen(false)}
+        questionId={feedback?.qid}
+        ready={() => chain.current}
+        onDone={() => setReported((prev) => ({ ...prev, [feedback?.qid]: true }))}
       />
     </View>
   );
@@ -816,6 +944,10 @@ const styles = StyleSheet.create({
 
   overScroll: { padding: 24, paddingTop: 48, alignItems: 'center', gap: 10 },
   overTitle: { fontFamily: SERIF_BOLD, fontSize: 25, color: PARCHMENT, textAlign: 'center' },
+  stars: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 6 },
+  cappedNote: { fontSize: 12.5, lineHeight: 19, color: MUTED, textAlign: 'center', marginTop: 4 },
+  feedbackLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  reportText: { fontFamily: DISPLAY_MID, fontSize: 11.5, letterSpacing: 0.6, color: MUTED },
   hero: { alignItems: 'center', marginTop: 22, marginBottom: 8 },
   heroValue: { fontFamily: DISPLAY, fontSize: 66, color: GOLD, lineHeight: 74 },
   overStats: {

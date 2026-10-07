@@ -17,8 +17,21 @@ export const quizKeys = (userId, lang = 'en') => ({
   bests: userKey(userId, 'quiz:bests'),
 });
 
-/** Today on this phone, as the server writes dates. */
-export const todayIso = () => format(new Date(), 'yyyy-MM-dd');
+// The quiz day turns over at midnight where the players are (East Africa,
+// UTC+3, no daylight saving) — the server counts days there too (songs/
+// days.py). Reading the phone's own date instead made a quiz kept from
+// before midnight look stale on a phone set to another zone, and the reverse.
+export const GAME_UTC_OFFSET_MINUTES = 180;
+
+/** Now, as a Date whose local fields read the players' clock — for date-fns
+ *  formatting of "which day is it there". */
+export const gameNow = (now = Date.now()) => {
+  const phoneOffset = new Date(now).getTimezoneOffset();          // minutes behind UTC
+  return new Date(now + (GAME_UTC_OFFSET_MINUTES + phoneOffset) * 60000);
+};
+
+/** Today where the players are, as the server writes dates. */
+export const todayIso = () => format(gameNow(), 'yyyy-MM-dd');
 
 /** A kept daily quiz is only today's quiz if it is dated today: yesterday's,
  *  with yesterday's "played" mark, must not be shown as today's. */

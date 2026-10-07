@@ -1190,17 +1190,34 @@ export const fetchCommunitiesByUrl = async (nextUrl) => {
 
 // `lang`: 'en' | 'sw' — the quiz is built from that language's Bible (the
 // server falls back to English when the Swahili one is not imported).
-export const fetchDailyQuiz = async (day, lang) => {
-  const q = [day && `date=${day}`, lang && `lang=${lang}`].filter(Boolean);
+// `play`: opened on the quiz screen to play (not the hub preloading it) —
+// the server starts the clock the speed bonus is held to.
+export const fetchDailyQuiz = async (day, lang, { play } = {}) => {
+  const q = [day && `date=${day}`, lang && `lang=${lang}`, play && 'play=1'].filter(Boolean);
   return apiRequest('get', `/quiz/today/${q.length ? `?${q.join('&')}` : ''}`);
 };
 
-export const submitDailyQuiz = async (answers, durationSeconds, lang) =>
+// `date`: the day of the quiz played (one opened before midnight can still be
+// handed in just after). `shuffled`: the answers are in the order this
+// person was shown the choices — false only for a copy kept from before.
+export const submitDailyQuiz = async (answers, durationSeconds, lang, { date, shuffled } = {}) =>
   apiRequest('post', '/quiz/submit/', {
     answers,
     duration_seconds: durationSeconds,
     ...(lang ? { language: lang } : {}),
+    ...(date ? { date } : {}),
+    shuffled: shuffled === true,
   });
+
+// "This question is wrong": reason is wrong_answer | unclear | typo | other.
+export const reportQuizQuestion = async (questionId, reason, note = '') =>
+  apiRequest('post', '/quiz/report/', { question_id: questionId, reason, note });
+
+// The story journey: { featured: [...], journey: [...] } with stars and locks.
+export const fetchQuizStories = async (lang) => apiRequest('get', `/quiz/stories/${lang ? `?lang=${lang}` : ''}`);
+
+// Forty practice questions with their answers, for playing with no connection.
+export const fetchOfflinePack = async (lang) => apiRequest('get', `/quiz/offline-pack/${lang ? `?lang=${lang}` : ''}`);
 
 // period: 'today' (default) | 'week' | 'all';
 // scope: 'everyone' | 'following' | 'group:<slug>' (a group you belong to).
@@ -1236,9 +1253,10 @@ export const buyStreakFreeze = async () => apiRequest('post', '/quiz/freeze/', {
 
 // mode: 'speed' | 'streak' | 'review' | 'section' (with `category`) |
 // 'duel' (with `of`: the Speed run it answers).
-export const startQuizSession = async (mode, lang, { category, of } = {}) =>
+export const startQuizSession = async (mode, lang, { category, of, story } = {}) =>
   apiRequest('post', '/quiz-sessions/', {
     mode, ...(lang ? { language: lang } : {}), ...(category ? { category } : {}), ...(of ? { of } : {}),
+    ...(story ? { story } : {}),
   });
 
 // ── Live Bible Battle ──────────────────────────────────────────────────────
@@ -2232,6 +2250,26 @@ export const saveQuizQuestion = (question) => (question.id
   : apiRequest('post', '/admin/quiz-bank/', question));
 export const retireQuizQuestion = (id) => apiRequest('delete', `/admin/quiz-bank/${id}/`);
 export const activateQuizQuestion = (id) => apiRequest('post', `/admin/quiz-bank/${id}/activate/`, {});
+// Claude drafts questions on a passage; they arrive switched off, for review.
+export const draftQuizQuestions = (body) => apiRequest('post', '/admin/quiz-bank/draft/', body);
+export const rejectQuizDraft = (id) => apiRequest('post', `/admin/quiz-bank/${id}/reject/`, {});
+// The day's quiz with its answers; rebuild it while nobody has played it.
+export const fetchAdminDailyQuiz = (params = {}) => apiRequest('get', '/admin/quiz-daily/', null, { params: only(params) });
+export const rebuildAdminDailyQuiz = (body = {}) => apiRequest('post', '/admin/quiz-daily/', body);
+// Players' reports on questions, and what was done about them.
+export const fetchQuizReports = (status = 'open') => apiRequest('get', '/admin/quiz-reports/', null, { params: { status } });
+export const resolveQuizReport = (id, status, retire = false) =>
+  apiRequest('post', `/admin/quiz-reports/${id}/resolve/`, { status, retire });
+// How each kind of question is answered, and runs too good to be honest.
+export const fetchAdminQuizStats = () => apiRequest('get', '/admin/quiz-stats/');
+// Battles still open, and ending one.
+export const fetchAdminBattles = () => apiRequest('get', '/admin/quiz-battles/');
+export const endAdminBattle = (code) => apiRequest('post', `/admin/quiz-battles/${code}/end/`, {});
+// The story journey's packs.
+export const fetchStoryPacksAdmin = () => apiRequest('get', '/admin/story-packs/');
+export const saveStoryPack = (pack) => (pack.id
+  ? apiRequest('patch', `/admin/story-packs/${pack.id}/`, pack)
+  : apiRequest('post', '/admin/story-packs/', pack));
 // The word puzzle's themes.
 export const fetchPuzzleThemesAdmin = () => apiRequest('get', '/admin/puzzle-themes/');
 export const savePuzzleTheme = (theme) => (theme.id
@@ -2439,6 +2477,9 @@ export default {
   fetchQuizBests,
   fetchDailyQuiz,
   submitDailyQuiz,
+  reportQuizQuestion,
+  fetchQuizStories,
+  fetchOfflinePack,
   fetchQuizLeaderboard,
   fetchQuizHistory,
   fetchQuizStats,

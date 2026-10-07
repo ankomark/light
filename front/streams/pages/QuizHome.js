@@ -10,8 +10,13 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fetchDailyQuiz, fetchQuizBests, fetchQuizStats, buyStreakFreeze, fetchQuizProgress } from '../services/api';
+import {
+  fetchDailyQuiz, fetchQuizBests, fetchQuizStats, buyStreakFreeze, fetchQuizProgress, fetchQuizStories,
+  fetchOfflinePack,
+} from '../services/api';
+import { refreshOfflinePack } from '../utils/offlinePack';
 import { peekCache, writeCache, userKey } from '../utils/screenCache';
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { useI18n } from '../context/I18nContext';
@@ -36,6 +41,20 @@ const QuizHome = ({ navigation }) => {
   const dailyData = useCachedData(keys.daily, () => fetchDailyQuiz(undefined, lang));
   const bestsData = useCachedData(keys.bests, fetchQuizBests);
   const statsData = useCachedData(keys.stats, fetchQuizStats);
+  // The story journey — kept like the rest, so the card paints at once.
+  const storiesData = useCachedData(userKey(currentUser?.id, `quiz:stories:${lang}`), () => fetchQuizStories(lang));
+  const stories = storiesData.data;
+  const featured = stories?.featured?.[0];
+  const journeyDone = (stories?.journey || []).filter((s) => s.stars > 0).length;
+  const insets = useSafeAreaInsets();
+  // Practice for no signal: today's pack fetched quietly while there is one.
+  const [offlineReady, setOfflineReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    refreshOfflinePack(lang, fetchOfflinePack).then((pack) => { if (live) setOfflineReady(!!pack); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [lang]);
   const bests = bestsData.data;
   const stats = statsData.data;
   // Yesterday's kept quiz, with yesterday's "played" mark, is not today's.
@@ -50,7 +69,8 @@ const QuizHome = ({ navigation }) => {
     dailyData.reload();
     bestsData.reload();
     statsData.reload();
-  }, [dailyData.reload, bestsData.reload, statsData.reload])); // eslint-disable-line react-hooks/exhaustive-deps
+    storiesData.reload();
+  }, [dailyData.reload, bestsData.reload, statsData.reload, storiesData.reload])); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A day streak that broke yesterday can be bought back with coins, once a
   // week — offered here, where the streak is shown.
@@ -107,7 +127,8 @@ const QuizHome = ({ navigation }) => {
     <View style={q.rootClear}>
       <View style={q.flex}>
 
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 40 + insets.bottom }]}
+                    showsVerticalScrollIndicator={false}>
 
           <Text style={q.pageTitle}>{t('quiz.homeTitle')}</Text>
 
@@ -247,7 +268,10 @@ const QuizHome = ({ navigation }) => {
             accessibilityLabel={`${t('quiz.title')}. ${played ? t('quiz.home.seeResult') : t('quiz.home.play')}`}
           >
             <View style={styles.dailyTop}>
-              <Text style={q.eyebrow}>{formatQuizDay(daily?.date)}</Text>
+              <Text style={q.eyebrow}>
+                {formatQuizDay(daily?.date)}
+                {daily?.theme ? `  ·  ${t(`quiz.theme.${daily.theme}`)}` : ''}
+              </Text>
               {played && (
                 <View style={styles.doneChip}>
                   <Ionicons name="checkmark" size={11} color={GOLD} />
@@ -267,6 +291,47 @@ const QuizHome = ({ navigation }) => {
               </Text>
               <Ionicons name="arrow-forward" size={15} color={GOLD} />
             </View>
+          </TouchableOpacity>
+
+          {/* This week's study, when an admin has featured one. */}
+          {!!featured && (
+            <TouchableOpacity
+              style={styles.featuredCard}
+              onPress={() => navigation.navigate('QuizPlay', { mode: 'story', story: featured.slug, title: featured.title })}
+              accessibilityRole="button"
+              testID="featured-story"
+            >
+              <Ionicons name={featured.icon || 'book-outline'} size={26} color={GOLD} />
+              <View style={styles.modeBody}>
+                <Text style={q.eyebrow}>{t('quiz.story.featured')}</Text>
+                <Text style={styles.modeTitle}>{featured.title}</Text>
+                <Text style={styles.modeText}>{featured.passage}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={MUTED} />
+            </TouchableOpacity>
+          )}
+
+          {/* The Bible's stories one by one, each opened by a star on the last. */}
+          <TouchableOpacity
+            style={styles.journeyCard}
+            onPress={() => navigation.navigate('QuizStories')}
+            activeOpacity={0.88}
+            accessibilityRole="button"
+            testID="story-journey"
+          >
+            <View style={styles.modeIcon}>
+              <Ionicons name="map" size={20} color={GOLD} />
+            </View>
+            <View style={styles.modeBody}>
+              <Text style={styles.modeTitle}>{t('quiz.story.title')}</Text>
+              <Text style={styles.modeText}>{t('quiz.story.hubBody')}</Text>
+              {!!stories?.journey?.length && (
+                <Text style={styles.modeBest}>
+                  {t('quiz.story.progress', { done: journeyDone, total: stories.journey.length })}
+                </Text>
+              )}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={MUTED} />
           </TouchableOpacity>
 
           {/* A room where everyone answers at once: a youth night, a class. */}
@@ -338,6 +403,17 @@ const QuizHome = ({ navigation }) => {
             })}
           </ScrollView>
 
+          {/* No signal: ten questions from the pack kept on the phone. */}
+          {offlineReady && (
+            <ModeCard
+              icon="cloud-offline-outline"
+              title={t('quiz.mode.offline')}
+              body={t('quiz.offline.body')}
+              onPress={() => navigation.navigate('QuizPlay', { mode: 'offline' })}
+              t={t}
+            />
+          )}
+
           <Text style={styles.note}>{t('quiz.home.note')}</Text>
         </ScrollView>
       </View>
@@ -390,6 +466,14 @@ const ICE = '#8EC5FF';
 const styles = StyleSheet.create({
   scroll: { padding: 20, paddingBottom: 40, gap: 12 },
 
+  featuredCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 16,
+    backgroundColor: 'rgba(244,162,97,0.10)', borderWidth: 1, borderColor: GOLD,
+  },
+  journeyCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 16,
+    backgroundColor: '#05080E', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,162,97,0.38)',
+  },
   battleCard: {
     padding: 16, gap: 8, borderRadius: 16, backgroundColor: '#05080E',
     borderWidth: 1, borderColor: 'rgba(244,162,97,0.4)',

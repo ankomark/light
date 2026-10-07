@@ -20,7 +20,7 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from songs.models import QuizAnswer, QuizQuestion, QuizSession
+from songs.models import Battle, DailyQuizStart, QuizAnswer, QuizQuestion, QuizSession
 
 BATCH = 2000  # delete in chunks so a big backlog can't lock the table
 
@@ -36,6 +36,10 @@ class Command(BaseCommand):
         parser.add_argument(
             '--abandoned-hours', type=int, default=24,
             help='Also prune runs left unfinished for this long (default 24).',
+        )
+        parser.add_argument(
+            '--battle-hours', type=int, default=6,
+            help='End battles left unfinished this long after they were made (default 6).',
         )
         parser.add_argument(
             '--dry-run', action='store_true',
@@ -76,10 +80,18 @@ class Command(BaseCommand):
         # score settles into the player's totals.
         closed = abandoned.update(is_finished=True, finished_at=now)
 
+        # A battle nobody moved on for hours is over: the room has gone home.
+        stale_battles = Battle.objects.exclude(status=Battle.FINISHED).filter(
+            created_at__lt=now - timedelta(hours=options['battle_hours']))
+        ended = stale_battles.update(status=Battle.FINISHED, finished_at=now)
+        # Quiz openings that were never handed in: only the day's matter.
+        DailyQuizStart.objects.filter(first_seen__lt=now - timedelta(days=2)).delete()
+
         self.stdout.write(self.style.SUCCESS(
-            'Pruned %d sessions: %d questions, %d answers removed, %d abandoned runs closed. '
+            'Pruned %d sessions: %d questions, %d answers removed, %d abandoned runs closed, '
+            '%d stale battles ended. '
             'Scores and personal bests are untouched.'
-            % (len(session_ids), removed_questions, removed_answers, closed)
+            % (len(session_ids), removed_questions, removed_answers, closed, ended)
         ))
 
     @staticmethod

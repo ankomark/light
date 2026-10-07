@@ -31,7 +31,7 @@ class ReviewBase(APITestCase):
         questions = self.client.get('/api/quiz/today/').data['questions']
         key = {q.id: q.answer_index for q in DailyQuiz.objects.get().questions.all()}
         answers = {str(q['id']): (key[q['id']] + 1) % len(q['choices']) for q in questions}
-        self.client.post('/api/quiz/submit/', {'answers': answers}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': answers}, format='json')
         return questions
 
     def make_due(self):
@@ -75,7 +75,7 @@ class ScheduleTests(ReviewBase):
     def test_right_answers_are_not_reviewed(self):
         questions = self.client.get('/api/quiz/today/').data['questions']
         key = {q.id: q.answer_index for q in DailyQuiz.objects.get().questions.all()}
-        self.client.post('/api/quiz/submit/', {'answers': {str(q['id']): key[q['id']] for q in questions}}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {str(q['id']): key[q['id']] for q in questions}}, format='json')
         self.assertFalse(ReviewItem.objects.exists())
 
     def test_a_practice_miss_joins_the_review(self):

@@ -15,6 +15,19 @@ from songs.models import BibleVerse, DailyQuiz, QuizAttempt, QuizQuestion
 from songs.quiz import QUESTIONS_PER_DAY, generate_for_date
 
 
+# Words that vary from verse to verse, so a missing word has look-alikes in
+# its book that are not already in the verse (as a real Bible has).
+VARIED = ['mountain', 'river', 'shepherd', 'garden', 'temple', 'harvest', 'vineyard',
+          'servant', 'prophet', 'kingdom', 'wilderness', 'fountain', 'morning', 'evening']
+
+
+def varied(ch, v):
+    """Two different words for chapter `ch`, verse `v`."""
+    first = VARIED[(ch * 5 + v) % len(VARIED)]
+    second = VARIED[(ch * 5 + v + 7) % len(VARIED)]
+    return first, second
+
+
 def seed_corpus(chapters=12, verses=30):
     """A corpus big enough to build a full quiz from, across several books."""
     from songs.quiz import forget_kept_corpora
@@ -27,8 +40,8 @@ def seed_corpus(chapters=12, verses=30):
                 rows.append(BibleVerse(
                     book=name, book_number=book['number'], chapter=ch, verse=v,
                     text=(f'And it came to pass in the {name} chapter {ch} verse {v} '
-                          f'that the people gathered together beside the water '
-                          f'and blessed the everlasting covenant forever.'),
+                          f'that the people gathered together beside the {varied(ch, v)[0]} '
+                          f'and blessed the everlasting {varied(ch, v)[1]} forever.'),
                 ))
     BibleVerse.objects.bulk_create(rows, ignore_conflicts=True)
 
@@ -83,6 +96,8 @@ class QuizGenerationTests(APITestCase):
             n = len(q.choices)
             if q.bank_question_id:
                 self.assertIn(n, (2, 3, 4), q.prompt)
+            elif q.kind in ('order', 'exact'):      # two passages; yes or no
+                self.assertEqual(n, 2, q.prompt)
             else:
                 self.assertEqual(n, 4, q.prompt)
             self.assertEqual(len(set(q.choices)), n, q.choices)
@@ -145,7 +160,7 @@ class QuizApiTests(APITestCase):
         self.client.get('/api/quiz/today/')
         quiz = DailyQuiz.objects.get()
         answers = {str(q.id): q.answer_index for q in quiz.questions.all()}
-        res = self.client.post('/api/quiz/submit/', {'answers': answers, 'duration_seconds': 90},
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': answers, 'duration_seconds': 90},
                                format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content[:300])
         self.assertEqual(res.data['score'], QUESTIONS_PER_DAY)
@@ -155,7 +170,7 @@ class QuizApiTests(APITestCase):
         self.client.get('/api/quiz/today/')
         quiz = DailyQuiz.objects.get()
         answers = {str(q.id): (q.answer_index + 1) % 4 for q in quiz.questions.all()}
-        res = self.client.post('/api/quiz/submit/', {'answers': answers}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': answers}, format='json')
         self.assertEqual(res.data['score'], 0)
         # After submitting, the truth is disclosed so the player can learn.
         for r in res.data['results']:
@@ -164,26 +179,26 @@ class QuizApiTests(APITestCase):
 
     def test_unanswered_questions_are_not_credited(self):
         self.client.get('/api/quiz/today/')
-        res = self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}}, format='json')
         self.assertEqual(res.data['score'], 0)
 
     def test_a_junk_choice_index_cannot_score(self):
         self.client.get('/api/quiz/today/')
         quiz = DailyQuiz.objects.get()
         answers = {str(q.id): 99 for q in quiz.questions.all()}
-        res = self.client.post('/api/quiz/submit/', {'answers': answers}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': answers}, format='json')
         self.assertEqual(res.data['score'], 0)
 
     def test_only_one_attempt_a_day(self):
         self.client.get('/api/quiz/today/')
-        self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
-        res = self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}}, format='json')
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(QuizAttempt.objects.filter(user=self.user).count(), 1)
 
     def test_today_reports_my_attempt_back(self):
         self.client.get('/api/quiz/today/')
-        self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}}, format='json')
         res = self.client.get('/api/quiz/today/')
         self.assertIsNotNone(res.data['my_attempt'])
         self.assertEqual(res.data['my_attempt']['total'], QUESTIONS_PER_DAY)
@@ -198,10 +213,10 @@ class QuizApiTests(APITestCase):
         self.client.get('/api/quiz/today/')
         quiz = DailyQuiz.objects.get()
         right = {str(q.id): q.answer_index for q in quiz.questions.all()}
-        self.client.post('/api/quiz/submit/', {'answers': right, 'duration_seconds': 200},
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': right, 'duration_seconds': 200},
                          format='json')
         self.client.force_authenticate(self.rival)
-        self.client.post('/api/quiz/submit/', {'answers': right, 'duration_seconds': 50},
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': right, 'duration_seconds': 50},
                          format='json')
         res = self.client.get('/api/quiz/leaderboard/')
         names = [r['user']['username'] for r in res.data['results']]
@@ -209,7 +224,7 @@ class QuizApiTests(APITestCase):
 
     def test_history_lists_past_days(self):
         self.client.get('/api/quiz/today/')
-        self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}}, format='json')
         res = self.client.get('/api/quiz/my-history/')
         self.assertEqual(len(res.data), 1)
 
@@ -304,32 +319,32 @@ class QuizEngineTests(APITestCase):
 
     def test_an_answer_row_is_written_per_question(self):
         from songs.models import QuizAnswer
-        self.client.post('/api/quiz/submit/', {'answers': self._all_right()}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right()}, format='json')
         self.assertEqual(QuizAnswer.objects.count(), QUESTIONS_PER_DAY)
 
     def test_points_beat_a_flat_point_each(self):
-        res = self.client.post('/api/quiz/submit/', {'answers': self._all_right()},
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right()},
                                format='json')
         self.assertEqual(res.data['score'], 20)
         self.assertGreater(res.data['points'], 20 * 10)
 
     def test_difficulty_is_worth_more(self):
         from songs.models import QuizAnswer
-        self.client.post('/api/quiz/submit/', {'answers': self._all_right(seconds=30)},
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right(seconds=30)},
                          format='json')
         rows = {r.question.difficulty: r for r in QuizAnswer.objects.all()}
         self.assertGreater(rows['hard'].points_earned, rows['simple'].points_earned)
 
     def test_answering_fast_earns_more_than_answering_slowly(self):
-        fast = self.client.post('/api/quiz/submit/', {'answers': self._all_right(seconds=1)},
+        fast = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right(seconds=1)},
                                 format='json').data['points']
         self.client.force_authenticate(self.rival)
-        slow = self.client.post('/api/quiz/submit/', {'answers': self._all_right(seconds=30)},
+        slow = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right(seconds=30)},
                                 format='json').data['points']
         self.assertGreater(fast, slow)
 
     def test_longest_streak_is_recorded(self):
-        res = self.client.post('/api/quiz/submit/', {'answers': self._all_right()},
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right()},
                                format='json')
         self.assertEqual(res.data['longest_streak'], QUESTIONS_PER_DAY)
 
@@ -337,13 +352,13 @@ class QuizEngineTests(APITestCase):
         answers = self._all_right()
         fifth = self.questions[4]
         answers[str(fifth.id)] = {'choice': (fifth.answer_index + 1) % 4, 'seconds': 2}
-        res = self.client.post('/api/quiz/submit/', {'answers': answers}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': answers}, format='json')
         self.assertEqual(res.data['score'], 19)
         self.assertEqual(res.data['longest_streak'], 15)
 
     def test_a_skipped_question_is_not_a_wrong_answer(self):
         from songs.models import QuizAnswer
-        self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}}, format='json')
         rows = QuizAnswer.objects.all()
         self.assertEqual(rows.count(), QUESTIONS_PER_DAY)
         self.assertTrue(all(r.chosen_index is None and not r.is_correct for r in rows))
@@ -351,7 +366,7 @@ class QuizEngineTests(APITestCase):
     def test_the_old_flat_payload_still_scores(self):
         """An app build predating per-question timing must keep working."""
         flat = {str(q.id): q.answer_index for q in self.questions}
-        res = self.client.post('/api/quiz/submit/', {'answers': flat}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': flat}, format='json')
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content[:200])
         self.assertEqual(res.data['score'], 20)
         self.assertGreater(res.data['points'], 0)
@@ -359,12 +374,12 @@ class QuizEngineTests(APITestCase):
     def test_a_forged_timing_cannot_beat_honest_fast_play(self):
         from songs.scoring import SPEED_MAX
         honest = self.client.post(
-            '/api/quiz/submit/', {'answers': self._all_right(seconds=0.5)}, format='json'
+            '/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right(seconds=0.5)}, format='json'
         ).data['points']
         self.client.force_authenticate(self.rival)
         forged = self.client.post(
             '/api/quiz/submit/',
-            {'answers': {str(q.id): {'choice': q.answer_index, 'seconds': -999}
+            {'shuffled': False, 'answers': {str(q.id): {'choice': q.answer_index, 'seconds': -999}
                          for q in self.questions}},
             format='json',
         ).data['points']
@@ -373,7 +388,7 @@ class QuizEngineTests(APITestCase):
     def test_the_explanation_arrives_only_after_answering(self):
         listing = self.client.get('/api/quiz/today/').data['questions']
         self.assertTrue(all('explanation' not in q for q in listing))
-        res = self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}}, format='json')
         self.assertTrue(all(r['explanation'] for r in res.data['results']))
 
     def test_questions_carry_a_category(self):
@@ -382,10 +397,10 @@ class QuizEngineTests(APITestCase):
 
     def test_the_board_ranks_on_points_not_raw_correct(self):
         """Same number right; the faster, harder-won run ranks first."""
-        self.client.post('/api/quiz/submit/', {'answers': self._all_right(seconds=25)},
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right(seconds=25)},
                          format='json')
         self.client.force_authenticate(self.rival)
-        self.client.post('/api/quiz/submit/', {'answers': self._all_right(seconds=1)},
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': self._all_right(seconds=1)},
                          format='json')
         res = self.client.get('/api/quiz/leaderboard/')
         self.assertEqual([r['user']['username'] for r in res.data['results']],
@@ -621,7 +636,7 @@ class QuizStatsTests(APITestCase):
         quiz = DailyQuiz.objects.get()
         answers = {str(q.id): {'choice': q.answer_index, 'seconds': 1}
                    for q in quiz.questions.all()}
-        self.client.post('/api/quiz/submit/', {'answers': answers}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': answers}, format='json')
         res = self.client.get('/api/quiz/stats/')
         self.assertGreater(res.data['total_coins'], 0)
         self.assertEqual(res.data['daily_coins'], res.data['total_coins'])
@@ -963,7 +978,11 @@ class QuizPhaseOneTests(APITestCase):
             self.client.force_authenticate(user)
         questions = self.client.get('/api/quiz/today/').data['questions']
         quiz = DailyQuiz.objects.get()
-        key = {q.id: q.answer_index for q in quiz.questions.all()}
+        from songs.quiz import display_order
+        uid = (user or self.user).pk
+        # The right answer where this player is shown it.
+        key = {q.id: display_order(uid, q.id, q.kind, len(q.choices)).index(q.answer_index)
+               for q in quiz.questions.all()}
         answers = {str(q['id']): (key[q['id']] if right else (key[q['id']] + 1) % len(q['choices']))
                    for q in questions}
         res = self.client.post('/api/quiz/submit/', {'answers': answers, 'duration_seconds': 60}, format='json')
@@ -1019,7 +1038,7 @@ class QuizPhaseOneTests(APITestCase):
 
     def test_a_second_attempt_is_refused_with_a_code_the_app_can_translate(self):
         self._play()
-        res = self.client.post('/api/quiz/submit/', {'answers': {}}, format='json')
+        res = self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {}}, format='json')
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(res.data['code'], 'already_played')
 
@@ -1091,7 +1110,7 @@ class LeaderboardPeriodTests(APITestCase):
         self._attempt(self.friend, self.today, 50)
         self.assertEqual(self.names(self._board(period='week')), ['ivy'])   # now cached
         questions = self.client.get('/api/quiz/today/').data['questions']
-        self.client.post('/api/quiz/submit/', {'answers': {str(q['id']): 0 for q in questions}}, format='json')
+        self.client.post('/api/quiz/submit/', {'shuffled': False, 'answers': {str(q['id']): 0 for q in questions}}, format='json')
         self.assertIn('mark', self.names(self._board(period='week')))
 
     def test_an_unknown_period_is_refused(self):

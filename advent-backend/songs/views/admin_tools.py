@@ -28,9 +28,10 @@ class BankQuestionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'kind', 'language', 'difficulty', 'category', 'prompt', 'choices', 'answer_index',
             'explanation', 'reference', 'is_active', 'retired_reason', 'times_asked', 'times_correct',
-            'accuracy', 'created_at', 'updated_at',
+            'accuracy', 'origin', 'needs_review', 'calibrated_from', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['retired_reason', 'times_asked', 'times_correct', 'created_at', 'updated_at']
+        read_only_fields = ['retired_reason', 'times_asked', 'times_correct', 'origin', 'needs_review',
+                            'calibrated_from', 'created_at', 'updated_at']
 
     def get_accuracy(self, obj):
         return round(obj.accuracy, 3) if obj.accuracy is not None else None
@@ -76,6 +77,9 @@ class AdminQuizBankViewSet(viewsets.ModelViewSet):
             qs = qs.filter(is_active=False).exclude(retired_reason='')
         elif state == 'off':
             qs = qs.filter(is_active=False)
+        elif state == 'review':
+            # Claude's drafts, waiting for a person to read them.
+            qs = qs.filter(needs_review=True)
         if (p.get('q') or '').strip():
             qs = qs.filter(Q(prompt__icontains=p['q'].strip()) | Q(reference__icontains=p['q'].strip()))
         return qs
@@ -105,9 +109,52 @@ class AdminQuizBankViewSet(viewsets.ModelViewSet):
         q.retired_reason = ''
         q.times_asked = 0
         q.times_correct = 0
-        q.save(update_fields=['is_active', 'retired_reason', 'times_asked', 'times_correct'])
+        # Switching a draft on is the review it was waiting for.
+        q.needs_review = False
+        q.save(update_fields=['is_active', 'retired_reason', 'times_asked', 'times_correct', 'needs_review'])
         log_admin_action(request.user, 'activate_question', 'bankquestion', q.id)
         return Response(self.get_serializer(q).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """A draft not worth keeping: off for good, out of the review list."""
+        q = self.get_object()
+        BankQuestion.objects.filter(pk=q.pk).update(is_active=False, needs_review=False)
+        log_admin_action(request.user, 'reject_question_draft', 'bankquestion', q.id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['post'])
+    def draft(self, request):
+        """Claude drafts questions on a passage, saved switched off for review.
+        POST {language, book_number, chapter_start, chapter_end, count, difficulty}
+        → {created: [...]}. Nothing drafted is asked until an admin activates it."""
+        from ..book_ai import AiFailed, AiOff
+        from ..quiz_drafts import DraftRefused, draft_questions
+
+        def number(field, default=None):
+            try:
+                return int(request.data.get(field, default))
+            except (TypeError, ValueError):
+                return None
+
+        language = request.data.get('language') if request.data.get('language') in ('en', 'sw') else 'en'
+        try:
+            made = draft_questions(language, number('book_number'), number('chapter_start'),
+                                   number('chapter_end'), number('count', 5) or 5,
+                                   request.data.get('difficulty') or '')
+        except DraftRefused as refused:
+            return Response({'error': 'That passage cannot be drafted from.', 'code': refused.code},
+                            status=status.HTTP_400_BAD_REQUEST)
+        except AiOff:
+            return Response({'error': 'AI is not available.', 'code': 'ai_off'},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except AiFailed:
+            return Response({'error': 'Claude could not draft just now.', 'code': 'ai_failed'},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        log_admin_action(request.user, 'draft_questions', 'bankquestion', None,
+                         reason=f"book {request.data.get('book_number')} {len(made)} drafts")
+        return Response({'created': self.get_serializer(made, many=True).data},
+                        status=status.HTTP_201_CREATED)
 
 
 # ── The word puzzle's themes ────────────────────────────────────────────────

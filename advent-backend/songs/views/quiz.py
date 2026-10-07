@@ -6,17 +6,21 @@ questions, which is what makes the leaderboard comparable.
 """
 from datetime import date as date_cls, timedelta
 
+from django.db import IntegrityError
 from django.db.models import Count, Max, Sum
 
 from .common import *  # noqa: F401,F403
 from rest_framework.exceptions import NotFound
+from ..days import local_day_start, local_today, seconds_into_day
 from ..models import (
-    DailyQuiz, PuzzleProgress, QuizAnswer, QuizAttempt, QuizQuestion, QuizSession,
-    VerseDay,
+    DailyQuiz, DailyQuizStart, PuzzleProgress, QuestionReport, QuizAnswer, QuizAttempt,
+    QuizQuestion, QuizSession, StoryPack, VerseDay,
 )
-from ..modes import BEST_MODES, DAILY, DUEL, MODES, REVIEW, SECTION, config
-from ..quiz import generate_for_date, record_bank_answers, start_session
-from ..scoring import coin_balance, level_for, score_answer
+from ..modes import BEST_MODES, DAILY, DUEL, MODES, REVIEW, SECTION, STORY, config
+from ..quiz import display_order, generate_for_date, record_bank_answers, start_session
+from ..scoring import (
+    PRACTICE_COINS_PER_DAY, coin_balance, level_for, score_answer, settle_times,
+)
 from ..streaks import day_streaks, streak_for
 from ..serializers.quiz import (
     DailyQuizSerializer, QuizAttemptSerializer, QuizSessionSerializer,
@@ -45,6 +49,21 @@ def _language(request):
     or one the quiz is not played in."""
     raw = request.query_params.get('lang') or (request.data.get('language') if hasattr(request, 'data') else None)
     return raw if raw in QUIZ_LANGUAGES else 'en'
+
+
+# How far back a past day's quiz can be read (never played: see _day). Far
+# enough for a week's catching up; bounded, because reading a day that was
+# never built builds it.
+PAST_DAYS = 7
+# A quiz opened before midnight may still be handed in this long after it.
+SUBMIT_GRACE_SECONDS = 2 * 60 * 60
+
+
+def _lock_player(user):
+    """Hold this person's row for the rest of the transaction: two requests
+    of theirs that must not both pass a check (one attempt a day, a balance
+    that must cover a spend) take turns."""
+    User.objects.select_for_update().filter(pk=user.pk).first()
 
 
 def _quiz_for(day, language='en'):
@@ -121,14 +140,24 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
     serializer_class = DailyQuizSerializer
     throttle_scope = 'quiz'
 
-    def _day(self, request):
-        raw = request.query_params.get('date')
+    def _day(self, request, past_days=PAST_DAYS):
+        """The day asked about (`date`, in the query or the body), today where
+        the players are when none. Never a day still to come — reading one
+        would build it early — and no further back than `past_days`."""
+        today = local_today()
+        raw = request.query_params.get('date') or (
+            request.data.get('date') if request.method == 'POST' else None)
         if not raw:
-            return timezone.localdate()
+            return today
         try:
-            return date_cls.fromisoformat(raw)
+            day = date_cls.fromisoformat(str(raw))
         except ValueError:
             raise ValidationError({'date': 'Use YYYY-MM-DD.'})
+        if day > today:
+            raise ValidationError({'date': 'That day has not come yet.', 'code': 'future'})
+        if past_days is not None and (today - day).days > past_days:
+            raise ValidationError({'date': 'Too long ago.', 'code': 'too_old'})
+        return day
 
     @action(detail=False, methods=['get'])
     def today(self, request):
@@ -139,40 +168,76 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         played = (QuizAttempt.objects.filter(user=request.user, quiz__date=day)
                   .select_related('quiz').first())
         quiz = played.quiz if played else _quiz_for(day, _language(request))
+        if not played and day == local_today():
+            self._note_start(request, quiz)
         return Response(self.get_serializer(quiz).data)
+
+    @staticmethod
+    def _note_start(request, quiz):
+        """When this person first saw today's quiz, and first opened it to
+        play (`play=1`, from the quiz screen) — the clock the speed bonus is
+        held to."""
+        start, _ = DailyQuizStart.objects.get_or_create(user=request.user, quiz=quiz)
+        if request.query_params.get('play') and not start.play_started_at:
+            DailyQuizStart.objects.filter(pk=start.pk, play_started_at__isnull=True).update(
+                play_started_at=timezone.now())
 
     @action(detail=False, methods=['post'])
     def submit(self, request):
         """Score an attempt. One per person per day — the score has to mean
         something on the board, so a second run is refused rather than
-        overwriting a worse (or better) first try."""
-        day = self._day(request)
+        overwriting a worse (or better) first try.
+
+        `date` is the day of the quiz that was played: today, or yesterday's
+        when it was opened before midnight and is handed in just after.
+        `shuffled` (default true) says the choices were answered in the
+        order this person was shown them; an app holding a copy from before
+        that order existed sends false.
+        """
+        day = self._day(request, past_days=1)
+        if day != local_today():
+            opened = DailyQuizStart.objects.filter(user=request.user, quiz__date=day).exists()
+            if not (opened and seconds_into_day() <= SUBMIT_GRACE_SECONDS):
+                return Response({'error': "That day's quiz has closed.", 'code': 'closed'},
+                                status=status.HTTP_400_BAD_REQUEST)
         quiz = _quiz_for(day, _language(request))
 
         # Once a day, in whichever language: the board counts both.
         if QuizAttempt.objects.filter(quiz__date=day, user=request.user).exists():
-            return Response(
-                {'error': 'You have already played today. Come back tomorrow.',
-                 'code': 'already_played'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return self._already_played()
 
         answers = request.data.get('answers') or {}
         if not isinstance(answers, dict):
             raise ValidationError({'answers': 'Expected {question_id: choice_index}.'})
+        shuffled = request.data.get('shuffled', True) not in (False, 'false', '0', 0)
 
         duration = request.data.get('duration_seconds')
         try:
             duration = int(duration) if duration is not None else None
         except (TypeError, ValueError):
             duration = None
+        if duration is not None and not 0 <= duration < 86400:
+            duration = None
 
         questions = list(quiz.questions.all())
+        read = {q.id: _read_answer(answers, q) for q in questions}
+        # The app's times, held to the server's clock (songs/scoring.py).
+        start = DailyQuizStart.objects.filter(user=request.user, quiz=quiz).first()
+        wall = None
+        if start:
+            wall = (timezone.now() - (start.play_started_at or start.first_seen)).total_seconds()
+        times = settle_times({qid: seconds for qid, (_c, seconds) in read.items()},
+                             wall, len(questions))
+
         score = points = streak = longest = 0
         results, cleaned, rows = [], {}, []
-
+        uid = request.user.pk
         for q in questions:
-            chosen, seconds = _read_answer(answers, q)
+            shown, _seconds = read[q.id]
+            order = (display_order(uid, q.pk, q.kind, len(q.choices)) if shuffled
+                     else list(range(len(q.choices))))
+            chosen = order[shown] if shown is not None else None
+            seconds = times.get(q.id)
             correct = chosen is not None and chosen == q.answer_index
 
             # A streak is consecutive correct answers in question order; a wrong
@@ -189,12 +254,13 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
 
             rows.append(QuizAnswer(
                 question=q, chosen_index=chosen, is_correct=correct,
-                points_earned=earned, response_seconds=seconds, streak_after=streak,
+                points_earned=earned, response_seconds=_as_float(_seconds), streak_after=streak,
             ))
+            # In the order the app answered in — the order it is showing.
             results.append({
                 'question_id': q.id,
-                'chosen_index': chosen,
-                'answer_index': q.answer_index,
+                'chosen_index': shown,
+                'answer_index': order.index(q.answer_index),
                 'correct': correct,
                 'reference': q.reference,
                 'explanation': q.explanation,
@@ -203,15 +269,24 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
                 'streak_after': streak,
             })
 
-        with transaction.atomic():
-            attempt = QuizAttempt.objects.create(
-                user=request.user, quiz=quiz, score=score, total=len(questions),
-                points=points, longest_streak=longest,
-                answers=cleaned, duration_seconds=duration,
-            )
-            for row in rows:
-                row.attempt = attempt
-            QuizAnswer.objects.bulk_create(rows)
+        try:
+            with transaction.atomic():
+                # Two submits at once (a double tap, or English and Swahili
+                # from two phones) take turns here; the second finds the first.
+                _lock_player(request.user)
+                if QuizAttempt.objects.filter(quiz__date=day, user=request.user).exists():
+                    return self._already_played()
+                attempt = QuizAttempt.objects.create(
+                    user=request.user, quiz=quiz, score=score, total=len(questions),
+                    points=points, longest_streak=longest,
+                    answers=cleaned, duration_seconds=duration,
+                )
+                for row in rows:
+                    row.attempt = attempt
+                QuizAnswer.objects.bulk_create(rows)
+        except IntegrityError:
+            return self._already_played()
+        DailyQuizStart.objects.filter(user=request.user, quiz=quiz).delete()
         _bump_board_version()
         # Written questions keep a record of how they are answered.
         record_bank_answers((r.question.bank_question_id, r.is_correct) for r in rows)
@@ -229,6 +304,14 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             'longest_streak': longest,
             'results': results,
         }, status=status.HTTP_201_CREATED)
+
+    @staticmethod
+    def _already_played():
+        return Response(
+            {'error': 'You have already played today. Come back tomorrow.',
+             'code': 'already_played'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     @action(detail=False, methods=['get'])
     def leaderboard(self, request):
@@ -249,7 +332,8 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         period = request.query_params.get('period') or 'today'
         if period not in self.PERIODS:
             raise ValidationError({'period': 'Use today, week or all.'})
-        day = self._day(request)
+        # Reading a board builds nothing, so any past day may be read.
+        day = self._day(request, past_days=None)
         circle = None
         scope = request.query_params.get('scope') or ''
         if scope == 'following':
@@ -284,6 +368,7 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
         rows = self._totals(period, day)
         if circle is not None:
             rows = [r for r in rows if r['user_id'] in circle]
+        champion = self._champion(day, circle) if period == 'week' else None
         top = rows[:self.BOARD_SIZE]
         users = User.objects.select_related('profile').in_bulk([r['user_id'] for r in top])
         mine = next((i for i, r in enumerate(rows) if r['user_id'] == request.user.pk), None)
@@ -299,7 +384,24 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
                 for r in top if r['user_id'] in users
             ],
             'me': None if mine is None else {'rank': mine + 1, 'of': len(rows)},
+            'champion': champion,
         })
+
+    @classmethod
+    def _champion(cls, day, circle=None):
+        """Last week's winner on this board — a church's, the people you
+        follow, or everyone's: the trophy a week of play is for."""
+        last_week = day - timedelta(days=day.weekday() + 1)
+        rows = cls._totals('week', last_week)
+        if circle is not None:
+            rows = [r for r in rows if r['user_id'] in circle]
+        if not rows:
+            return None
+        user = User.objects.select_related('profile').filter(pk=rows[0]['user_id']).first()
+        if not user:
+            return None
+        return {'user': SimpleUserSerializer(user).data, 'points': rows[0]['points'],
+                'week_of': (last_week - timedelta(days=last_week.weekday())).isoformat()}
 
     PERIODS = ('today', 'week', 'all')
     BOARD_ORDER = ('-points', '-score', 'duration_seconds', 'completed_at')
@@ -441,6 +543,104 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             return Response({'code': refused.code}, status=status.HTTP_400_BAD_REQUEST)
         return Response(streak, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['post'])
+    def report(self, request):
+        """"This question is wrong": POST {question_id, reason, note}. Only for
+        a question you have answered — reporting is for what you were asked.
+        Once per question per person; a copy is kept for the admin queue."""
+        from ..quiz_ai import has_answered
+        question = (QuizQuestion.objects.filter(pk=request.data.get('question_id'))
+                    .select_related('quiz', 'session').first())
+        if not question:
+            raise NotFound('No such question.')
+        if not has_answered(request.user, question):
+            return Response({'error': 'Answer the question first.', 'code': 'not_answered'},
+                            status=status.HTTP_403_FORBIDDEN)
+        reason = request.data.get('reason')
+        if reason not in dict(QuestionReport.REASON_CHOICES):
+            raise ValidationError({'reason': 'Choose one of: %s.' % ', '.join(dict(QuestionReport.REASON_CHOICES))})
+        owner = question.quiz or question.session
+        try:
+            QuestionReport.objects.create(
+                user=request.user, question=question, bank_question_id=question.bank_question_id,
+                kind=question.kind, language=getattr(owner, 'language', 'en') or 'en',
+                prompt=question.prompt, passage=question.passage, choices=question.choices,
+                answer_index=question.answer_index, reference=question.reference,
+                reason=reason, note=str(request.data.get('note') or '')[:500],
+            )
+        except IntegrityError:
+            return Response({'status': 'already_reported'})
+        return Response({'status': 'reported'}, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'])
+    def stories(self, request):
+        """The story journey: {featured: [...], journey: [...]}, each story
+        with its stars (best run) and whether it is open yet."""
+        from ..bible_books import BIBLE_BOOKS
+        from ..quiz import corpus_for
+        sw = _language(request) == 'sw'
+        names = {b['number']: b['name'] for b in BIBLE_BOOKS}
+        if sw:
+            names.update(dict(corpus_for('sw').book_names()))
+        stars = _story_stars(request.user)
+        packs = list(StoryPack.objects.filter(is_active=True))
+
+        def row(pack, unlocked):
+            span = (str(pack.chapter_start) if pack.chapter_start == pack.chapter_end
+                    else f'{pack.chapter_start}–{pack.chapter_end}')
+            return {
+                'slug': pack.slug,
+                'title': (pack.title_sw if sw and pack.title_sw else pack.title),
+                'summary': (pack.summary_sw if sw and pack.summary_sw else pack.summary),
+                'passage': f'{names.get(pack.book_number, "")} {span}'.strip(),
+                'icon': pack.icon, 'stars': stars.get(pack.slug, 0), 'unlocked': unlocked,
+            }
+
+        journey, open_next = [], True
+        for pack in packs:
+            if pack.is_featured:
+                continue
+            journey.append(row(pack, open_next))
+            open_next = stars.get(pack.slug, 0) >= 1
+        return Response({
+            'featured': [row(p, True) for p in packs if p.is_featured],
+            'journey': journey,
+        })
+
+    OFFLINE_MIX = [('simple', 15), ('moderate', 15), ('hard', 10)]
+    OFFLINE_CACHE_SECONDS = 26 * 60 * 60
+
+    @action(detail=False, methods=['get'], url_path='offline-pack')
+    def offline_pack(self, request):
+        """Practice to carry: forty questions with their answers, to play with
+        no connection. The same pack for everyone each day (built once, kept),
+        never from the written bank and never a verse of today's quiz, so it
+        gives nothing away — and it pays no coins: it is played on the phone,
+        where nothing is checked."""
+        import random as _random
+        from ..quiz import _seed_for, build_questions, corpus_for
+        lang = _language(request)
+        day = local_today()
+        key = f'quiz-offline:{lang}:{day.isoformat()}'
+        body = cache.get(key)
+        if body is None:
+            corpus = corpus_for(lang)
+            try:
+                built = build_questions(_random.Random(_seed_for(day) + 104729), self.OFFLINE_MIX,
+                                        corpus, famous=4, bank=False)
+            except ValueError as exc:
+                raise APIException(str(exc))
+            todays = set(QuizQuestion.objects.filter(quiz__date=day).values_list('reference', flat=True))
+            fields = ('kind', 'difficulty', 'category', 'prompt', 'passage', 'choices',
+                      'answer_index', 'reference', 'explanation')
+            body = {
+                'date': day.isoformat(), 'language': corpus.language,
+                'questions': [{'id': f'off-{i}', **{f: q.get(f, '') for f in fields}}
+                              for i, q in enumerate(built) if q.get('reference') not in todays],
+            }
+            cache.set(key, body, self.OFFLINE_CACHE_SECONDS)
+        return Response(body)
+
     @action(detail=False, methods=['get'], url_path='my-history')
     def my_history(self, request):
         # Order before slicing — a sliced queryset cannot be reordered.
@@ -455,6 +655,35 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
             }
             for a in attempts
         ])
+
+
+def _practice_coins_today(user):
+    """What practice runs have paid this person today."""
+    return (QuizSession.objects.filter(user=user, started_at__gte=local_day_start())
+            .exclude(mode=DAILY).aggregate(n=Sum('points'))['n'] or 0)
+
+
+def _story_stars(user):
+    """{story slug: stars} from each story's best run — three for ten right,
+    two for eight, one for six."""
+    best = dict(QuizSession.objects.filter(user=user, mode=STORY)
+                .values_list('topic').annotate(best=Max('score')))
+    return {slug: (3 if n >= 10 else 2 if n >= 8 else 1 if n >= 6 else 0) for slug, n in best.items()}
+
+
+def _story_open(user, pack, stars=None):
+    """The first story is open; each after it opens with a star on the one
+    before. A featured story (this week's study) is open to everyone."""
+    if pack.is_featured:
+        return True
+    packs = list(StoryPack.objects.filter(is_active=True, is_featured=False).values_list('slug', flat=True))
+    if pack.slug not in packs:
+        return False
+    i = packs.index(pack.slug)
+    if i == 0:
+        return True
+    stars = _story_stars(user) if stars is None else stars
+    return stars.get(packs[i - 1], 0) >= 1
 
 
 class QuizSessionViewSet(viewsets.GenericViewSet):
@@ -484,9 +713,8 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
         # Every run generates its own questions (10 for Speed, 40 for Streak),
         # so unlimited practice is unlimited rows. Far above anyone's honest
         # appetite for a day, and it bounds the table.
-        today = timezone.localdate()
         played_today = QuizSession.objects.filter(
-            user=request.user, started_at__date=today,
+            user=request.user, started_at__gte=local_day_start(),
         ).count()
         if played_today >= DAILY_SESSION_LIMIT:
             return Response(
@@ -499,7 +727,9 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             if mode == DUEL:
                 from ..quiz_duel import DuelRefused, start_duel
                 try:
-                    session = start_duel(request.user, request.data.get('of'))
+                    with transaction.atomic():
+                        _lock_player(request.user)       # one copy of a duel, however many taps
+                        session = start_duel(request.user, request.data.get('of'))
                 except DuelRefused as refused:
                     code = status.HTTP_404_NOT_FOUND if refused.code == 'not_found' else status.HTTP_400_BAD_REQUEST
                     return Response({'error': 'This duel cannot be played.', 'code': refused.code}, status=code)
@@ -510,6 +740,14 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
                 except NothingDue:
                     return Response({'error': 'Nothing is due for review.', 'code': 'nothing_due'},
                                     status=status.HTTP_400_BAD_REQUEST)
+            elif mode == STORY:
+                pack = StoryPack.objects.filter(slug=request.data.get('story') or '', is_active=True).first()
+                if not pack:
+                    raise ValidationError({'story': 'No such story.'})
+                if not _story_open(request.user, pack):
+                    return Response({'error': 'Finish the story before this one first.', 'code': 'locked'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                session = start_session(request.user, mode, _language(request), story=pack)
             else:
                 category = None
                 if mode == SECTION:
@@ -534,22 +772,7 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
         session = self.get_object()
         cfg = config(session.mode)
 
-        if session.is_finished:
-            return Response({'error': 'This run is already over.'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        question = session.questions.filter(pk=request.data.get('question_id')).first()
-        if not question:
-            raise ValidationError({'question_id': 'Not a question in this run.'})
-        if QuizAnswer.objects.filter(session=session, question=question).exists():
-            return Response({'error': 'You have already answered that one.'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
         raw = request.data.get('choice')
-        chosen = raw if isinstance(raw, int) and not isinstance(raw, bool) else None
-        if chosen is not None and not (0 <= chosen < len(question.choices)):
-            chosen = None
-
         seconds = request.data.get('seconds')
         # A per-question clock is part of the rules, not decoration: running out
         # of time is a wrong answer, and the server decides that, not the app.
@@ -561,31 +784,58 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             except (TypeError, ValueError):
                 timed_out = False
 
-        correct = (not timed_out) and chosen is not None and chosen == question.answer_index
+        try:
+            with transaction.atomic():
+                # One answer at a time per run: a double tap, or the retry of
+                # an answer whose reply was lost, finds the first one here
+                # instead of adding its points a second time.
+                session = QuizSession.objects.select_for_update().get(pk=session.pk)
+                if session.is_finished:
+                    return Response({'error': 'This run is already over.', 'code': 'finished'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                question = session.questions.filter(pk=request.data.get('question_id')).first()
+                if not question:
+                    raise ValidationError({'question_id': 'Not a question in this run.'})
+                if QuizAnswer.objects.filter(session=session, question=question).exists():
+                    return self._answered()
 
-        streak = session.streak + 1 if correct else 0
-        earned, parts = score_answer(
-            question.difficulty, correct, seconds, streak, profile=cfg,
-        )
+                chosen = raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+                if chosen is not None and not (0 <= chosen < len(question.choices)):
+                    chosen = None
+                correct = (not timed_out) and chosen is not None and chosen == question.answer_index
 
-        with transaction.atomic():
-            QuizAnswer.objects.create(
-                session=session, question=question, chosen_index=chosen,
-                is_correct=correct, points_earned=earned,
-                response_seconds=_as_float(seconds), streak_after=streak,
-            )
-            session.answered += 1
-            session.points += earned
-            session.streak = streak
-            session.longest_streak = max(session.longest_streak, streak)
-            if correct:
-                session.score += 1
-            # Streak mode ends on the first miss; every mode ends when the
-            # questions run out.
-            if (cfg['ends_on_wrong'] and not correct) or session.answered >= session.questions.count():
-                session.is_finished = True
-                session.finished_at = timezone.now()
-            session.save()
+                streak = session.streak + 1 if correct else 0
+                earned, parts = score_answer(
+                    question.difficulty, correct, seconds, streak, profile=cfg,
+                )
+                # What practice may still pay today (songs/scoring.py).
+                capped = False
+                if earned:
+                    # Two runs at once must not both fit under one day's ceiling.
+                    _lock_player(request.user)
+                    room = max(0, PRACTICE_COINS_PER_DAY - _practice_coins_today(request.user))
+                    if earned > room:
+                        earned, capped = room, True
+
+                QuizAnswer.objects.create(
+                    session=session, question=question, chosen_index=chosen,
+                    is_correct=correct, points_earned=earned,
+                    response_seconds=_as_float(seconds), streak_after=streak,
+                )
+                session.answered += 1
+                session.points += earned
+                session.streak = streak
+                session.longest_streak = max(session.longest_streak, streak)
+                if correct:
+                    session.score += 1
+                # Streak mode ends on the first miss; every mode ends when the
+                # questions run out.
+                if (cfg['ends_on_wrong'] and not correct) or session.answered >= session.questions.count():
+                    session.is_finished = True
+                    session.finished_at = timezone.now()
+                session.save()
+        except IntegrityError:
+            return self._answered()
         record_bank_answers([(question.bank_question_id, correct)])
         if session.is_finished and session.mode == DUEL and session.duel_of_id:
             _tell_challenger(session)
@@ -603,6 +853,9 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             'explanation': question.explanation,
             'points_earned': earned,
             'points_breakdown': parts,
+            # Today's practice has paid all it can: still played, still
+            # counted, no more coins until tomorrow.
+            'capped': capped,
             'streak': session.streak,
             # `brief`: the app already holds the questions, so only the
             # totals come back — re-sending the whole run on every tap was
@@ -610,6 +863,11 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             'session': (self._totals(session) if request.data.get('brief')
                         else self.get_serializer(session).data),
         })
+
+    @staticmethod
+    def _answered():
+        return Response({'error': 'You have already answered that one.', 'code': 'answered'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
     @staticmethod
     def _totals(session):
@@ -654,6 +912,8 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
             return Response({'error': 'Nothing to take away.', 'code': 'no_hint'},
                             status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
+            # Hints on two questions at once must not both spend one balance.
+            _lock_player(request.user)
             # Marked first, conditionally: two taps at once buy it once.
             claimed = QuizQuestion.objects.filter(pk=question.pk, hint_used=False).update(hint_used=True)
             if not claimed:
@@ -720,7 +980,8 @@ class DailyVerseView(APIView):
         from ..devotion import verse_for_date
         from ..verse_reflections import reflection_for
 
-        today = timezone.localdate()
+        # The players' day, as the quiz's: the verse turns at their midnight.
+        today = local_today()
         raw = request.query_params.get('date')
         day = today
         if raw:

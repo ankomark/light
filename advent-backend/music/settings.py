@@ -530,6 +530,9 @@ TRUSTED_PROXY_COUNT = int(os.environ.get('TRUSTED_PROXY_COUNT', '0') or 0)
 # The window the daily quiz reminder judges "morning" in. The server runs on
 # UTC but the audience does not, so the cron fires at 04:00 UTC for 07:00 here.
 QUIZ_REMINDER_TZ = os.getenv('QUIZ_REMINDER_TZ', 'Africa/Nairobi')
+# The zone a game day is counted in (songs/days.py): when the daily quiz turns
+# over, which day a streak is played on. Same audience, same zone.
+QUIZ_TZ = os.getenv('QUIZ_TZ', QUIZ_REMINDER_TZ)
 
 USE_I18N = True
 

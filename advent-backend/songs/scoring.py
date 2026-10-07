@@ -90,6 +90,48 @@ def score_answer(difficulty, is_correct, response_seconds, streak, profile=None)
     return sum(parts.values()), parts
 
 
+# ── the server's clock ───────────────────────────────────────────────────────
+# The app reports how long each answer took, and an app can under-report. The
+# server knows when the quiz was opened to play: the answers together cannot
+# have taken much less than the time that has passed since. The share leaves
+# room for what is not on a question (the map, the submit prompt), and the
+# sitting is counted at most as long as a slow honest player's — someone who
+# opened the quiz and came back after lunch still earns a little speed.
+HONEST_SHARE = 0.6
+
+
+def settle_times(claimed, wall_seconds, questions):
+    """`claimed` {question_id: seconds or None}, scaled up evenly when together
+    they claim less than HONEST_SHARE of the real sitting. A forged run of
+    zeros earns what an honest run as quick as the clock allows would — no
+    more. Unchanged when there is no clock to go by (an older app)."""
+    if wall_seconds is None or questions <= 0:
+        return claimed
+    floor = HONEST_SHARE * min(max(0.0, wall_seconds), questions * SLOW_SECONDS)
+    timed = {}
+    for key, value in claimed.items():
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            continue
+        if seconds >= 0 and seconds == seconds:
+            timed[key] = seconds
+    total = sum(timed.values())
+    if not timed or total >= floor:
+        return claimed
+    out = dict(claimed)
+    for key, seconds in timed.items():
+        out[key] = (seconds * floor / total) if total > 0 else floor / len(timed)
+    return out
+
+
+# What practice can pay in one day. Practice is played with the answers in
+# the app (it is told at once), so a script could play it perfectly forever;
+# a day's ceiling well above honest play keeps that from buying the levels,
+# hints and freezes everyone else plays for.
+PRACTICE_COINS_PER_DAY = 1500
+
+
 def perfect_score(difficulties):
     """The most a day's quiz can pay — useful for showing 'x of y possible'."""
     return sum(

@@ -239,3 +239,22 @@ class BankQuestionAdmin(admin.ModelAdmin):
     def retire(self, request, queryset):
         n = queryset.update(is_active=False)
         self.message_user(request, f'{n} question(s) taken out.')
+
+
+from .models import QuestionReport, StoryPack  # noqa: E402
+
+
+@admin.register(StoryPack)
+class StoryPackAdmin(admin.ModelAdmin):
+    list_display = ('title', 'book_number', 'chapter_start', 'chapter_end', 'order', 'is_active', 'is_featured')
+    list_filter = ('is_active', 'is_featured')
+    search_fields = ('title', 'title_sw', 'slug')
+    ordering = ('order', 'id')
+
+
+@admin.register(QuestionReport)
+class QuestionReportAdmin(admin.ModelAdmin):
+    list_display = ('prompt', 'reason', 'status', 'user', 'created_at')
+    list_filter = ('status', 'reason', 'language')
+    search_fields = ('prompt', 'note', 'reference')
+    raw_id_fields = ('user', 'question', 'bank_question', 'resolved_by')

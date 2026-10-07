@@ -11,11 +11,17 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
 import {
   fetchQuizBank, fetchAdminByUrl, saveQuizQuestion, retireQuizQuestion, activateQuizQuestion,
+  draftQuizQuestions, rejectQuizDraft,
 } from '../../services/api';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { ADMIN, ErrorState } from './AdminKit';
+import { BookPicker, ChapterRange, bookAt } from './QuizAdminKit';
 
-const STATES = ['', 'active', 'retired', 'off'];
+// `review`: Claude's drafts, off until a person has read them and switched them on.
+const STATES = ['', 'review', 'active', 'retired', 'off'];
+const DRAFT_COUNTS = [3, 5, 10];
+const DRAFT_LEVELS = ['', 'simple', 'moderate', 'hard'];
+const BLANK_ASK = { language: 'en', book_number: 1, chapter_start: 1, chapter_end: 3, count: 5, difficulty: '' };
 const KINDS = ['who_said', 'true_false', 'order', 'fact'];
 const LEVELS = ['simple', 'moderate', 'hard'];
 const LANGS = ['en', 'sw'];
@@ -55,6 +61,9 @@ export default function AdminQuizBank() {
   const [draft, setDraft] = useState(null);       // the question being written or edited
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // Asking Claude for drafts on a passage.
+  const [ask, setAsk] = useState(null);
+  const [asking, setAsking] = useState(false);
   const latest = useRef(0);
   const debounce = useRef(null);
 
@@ -107,6 +116,42 @@ export default function AdminQuizBank() {
     }
   };
 
+  const requestDrafts = async () => {
+    const book = bookAt(ask.book_number);
+    if (!book || !ask.chapter_start || ask.chapter_end < ask.chapter_start || ask.chapter_end > book.chapters
+        || ask.chapter_end - ask.chapter_start > 4) {
+      setError(t('adminQuiz.draft.badRange'));
+      return;
+    }
+    setAsking(true);
+    setError('');
+    try {
+      const res = await draftQuizQuestions(ask);
+      const made = res?.created || [];
+      setAsk(null);
+      setState('review');
+      setLanguage(ask.language);
+      setRows(made);
+      load(ask.language, 'review', '');
+      notify(t('adminQuiz.draft.doneTitle'), t('adminQuiz.draft.doneBody', { count: made.length }));
+    } catch (e) {
+      const code = e?.data?.code || e?.response?.data?.code;
+      setError(t(code === 'ai_off' ? 'adminQuiz.draft.off' : code === 'no_text' ? 'adminQuiz.draft.noText'
+        : code === 'bad_range' ? 'adminQuiz.draft.badRange' : 'adminQuiz.draft.failed'));
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  const reject = async (q) => {
+    try {
+      await rejectQuizDraft(q.id);
+      setRows((prev) => prev.filter((r) => r.id !== q.id));
+    } catch (e) {
+      notify(t('common.error'), e?.data?.error || t('admin.actionFailedShort'));
+    }
+  };
+
   const retireOrBring = async (q) => {
     try {
       if (q.is_active) {
@@ -148,6 +193,33 @@ export default function AdminQuizBank() {
         {[t(`adminQuiz.kind.${item.kind}`), t(`adminQuiz.level.${item.difficulty}`), item.language.toUpperCase(),
           item.reference].filter(Boolean).join('  ·  ')}
       </Text>
+      {!!item.explanation && <Text style={styles.explain} numberOfLines={3}>{item.explanation}</Text>}
+      {(item.origin === 'ai' || !!item.calibrated_from) && (
+        <View style={styles.badges}>
+          {item.origin === 'ai' && (
+            <Text style={styles.badge} testID={`quiz-ai-${item.id}`}>{t('adminQuiz.draft.byClaude')}</Text>
+          )}
+          {!!item.calibrated_from && (
+            <Text style={styles.badge}>
+              {t('adminQuiz.calibrated', { from: t(`adminQuiz.level.${item.calibrated_from}`) })}
+            </Text>
+          )}
+        </View>
+      )}
+      {item.needs_review ? (
+        // A draft: read it against the verse, then use it or let it go.
+        <View style={styles.footRow}>
+          <Text style={styles.reviewNote}>{t('adminQuiz.draft.check')}</Text>
+          <View style={styles.reviewBtns}>
+            <TouchableOpacity onPress={() => reject(item)} testID={`quiz-reject-${item.id}`}>
+              <Text style={[styles.toggle, styles.toggleOff]}>{t('adminQuiz.draft.reject')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => retireOrBring(item)} testID={`quiz-approve-${item.id}`}>
+              <Text style={[styles.toggle, styles.toggleOn]}>{t('adminQuiz.draft.approve')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
       <View style={styles.footRow}>
         <Text style={styles.stats}>
           {item.times_asked
@@ -160,6 +232,7 @@ export default function AdminQuizBank() {
           </Text>
         </TouchableOpacity>
       </View>
+      )}
       {!!item.retired_reason && (
         <Text style={styles.retired} testID={`quiz-retired-${item.id}`}>{t(`adminQuiz.retiredFor.${item.retired_reason}`)}</Text>
       )}
@@ -170,11 +243,18 @@ export default function AdminQuizBank() {
     <View style={styles.container}>
       <View style={styles.head}>
         <Text style={styles.title}>{t('adminQuiz.title')}</Text>
-        <TouchableOpacity style={styles.newBtn} onPress={() => { setError(''); setDraft({ ...BLANK, language }); }}
-                          testID="quiz-new">
-          <Ionicons name="add" size={18} color={ADMIN.onGold} />
-          <Text style={styles.newText}>{t('adminQuiz.new')}</Text>
-        </TouchableOpacity>
+        <View style={styles.headBtns}>
+          <TouchableOpacity style={[styles.newBtn, styles.askBtn]} onPress={() => { setError(''); setAsk({ ...BLANK_ASK, language }); }}
+                            testID="quiz-ask-claude" accessibilityLabel={t('adminQuiz.draft.ask')}>
+            <Ionicons name="sparkles" size={16} color={ADMIN.gold} />
+            <Text style={[styles.newText, styles.askText]}>{t('adminQuiz.draft.short')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.newBtn} onPress={() => { setError(''); setDraft({ ...BLANK, language }); }}
+                            testID="quiz-new">
+            <Ionicons name="add" size={18} color={ADMIN.onGold} />
+            <Text style={styles.newText}>{t('adminQuiz.new')}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       <Chips options={LANGS} value={language} onPick={(l) => refilter(l, state)} label={(l) => l.toUpperCase()} testID="quiz-lang" />
       <Chips options={STATES} value={state} onPick={(st) => refilter(language, st)} label={(st) => t(`adminQuiz.state.${st || 'all'}`)}
@@ -198,6 +278,43 @@ export default function AdminQuizBank() {
           ListEmptyComponent={<Text style={styles.empty}>{t('adminQuiz.none')}</Text>}
         />
       )}
+
+      <Modal visible={!!ask} transparent animationType="slide" onRequestClose={() => setAsk(null)}>
+        <View style={styles.backdrop}>
+          <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: 28 }}
+                      keyboardShouldPersistTaps="handled" testID="quiz-ask">
+            <Text style={styles.sheetTitle}>{t('adminQuiz.draft.ask')}</Text>
+            <Text style={styles.stats}>{t('adminQuiz.draft.intro')}</Text>
+            {ask && (
+              <>
+                <Chips options={LANGS} value={ask.language} onPick={(v) => setAsk((a) => ({ ...a, language: v }))}
+                       label={(v) => v.toUpperCase()} testID="ask-lang" />
+                <Text style={styles.label}>{t('adminQuiz.draft.book')}</Text>
+                <BookPicker value={ask.book_number} testID="ask-book"
+                            onPick={(n) => setAsk((a) => ({ ...a, book_number: n, chapter_start: 1,
+                              chapter_end: Math.min(3, bookAt(n)?.chapters || 1) }))} />
+                <ChapterRange first={ask.chapter_start} last={ask.chapter_end} max={bookAt(ask.book_number)?.chapters}
+                              label={t('adminQuiz.draft.chapters')} testID="ask-chapters"
+                              onChange={(a, b) => setAsk((x) => ({ ...x, chapter_start: a, chapter_end: b }))} />
+                <Text style={styles.label}>{t('adminQuiz.draft.howMany')}</Text>
+                <Chips options={DRAFT_COUNTS} value={ask.count} onPick={(v) => setAsk((a) => ({ ...a, count: v }))}
+                       label={(v) => String(v)} testID="ask-count" />
+                <Chips options={DRAFT_LEVELS} value={ask.difficulty} onPick={(v) => setAsk((a) => ({ ...a, difficulty: v }))}
+                       label={(v) => (v ? t(`adminQuiz.level.${v}`) : t('adminQuiz.draft.mix'))} testID="ask-level" />
+                {!!error && <Text style={styles.error} testID="ask-error">{error}</Text>}
+                <TouchableOpacity style={[styles.save, asking && { opacity: 0.6 }]} onPress={requestDrafts} disabled={asking}
+                                  testID="ask-send">
+                  {asking ? <ActivityIndicator color={ADMIN.onGold} /> : <Text style={styles.saveText}>{t('adminQuiz.draft.send')}</Text>}
+                </TouchableOpacity>
+                <Text style={styles.stats}>{t('adminQuiz.draft.wait')}</Text>
+                <TouchableOpacity onPress={() => setAsk(null)} style={{ alignItems: 'center', padding: 8 }}>
+                  <Text style={styles.cancel}>{t('common.cancel')}</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
         <View style={styles.backdrop}>
@@ -264,6 +381,17 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8 },
   title: { color: ADMIN.text, fontSize: 26, fontWeight: '800' },
   newBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: ADMIN.gold, borderRadius: 18, paddingHorizontal: 14, height: 36 },
+  headBtns: { flexDirection: 'row', gap: 8 },
+  askBtn: { backgroundColor: 'transparent', borderWidth: 1, borderColor: ADMIN.gold, paddingHorizontal: 12 },
+  askText: { color: ADMIN.gold },
+  explain: { color: ADMIN.muted, fontSize: 12.5, lineHeight: 18, fontStyle: 'italic' },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  badge: {
+    color: ADMIN.gold, fontSize: 11.5, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: ADMIN.gold, overflow: 'hidden',
+  },
+  reviewNote: { flex: 1, color: '#FFB547', fontSize: 12.5 },
+  reviewBtns: { flexDirection: 'row', gap: 16 },
   newText: { color: ADMIN.onGold, fontWeight: '800' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, marginTop: 8 },
   chip: {
