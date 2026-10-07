@@ -26,6 +26,17 @@ from songs.scoring import (
     COINS_PER_BONUS_WORD, COINS_PER_WORD, HINT_COST, coin_balance, completion_bonus,
 )
 
+
+def unlock(user, theme, level, language='en'):
+    """Mark every level before `level` finished, so the map lets it open."""
+    if level <= 1:
+        return
+    puzzle = generate(theme, level - 1, language=language)
+    PuzzleProgress.objects.update_or_create(
+        user=user, puzzle=puzzle,
+        defaults={'found': list(puzzle.words), 'is_complete': True, 'completed_at': timezone.now()},
+    )
+
 LINES = [
     'The LORD is my shepherd I shall not want',
     'He maketh me to lie down in green pastures beside the still waters',
@@ -882,6 +893,7 @@ class EndlessLevelsTests(APITestCase):
     def test_the_band_goes_out_with_the_level(self):
         user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
         self.client.force_authenticate(user)
+        unlock(user, self.theme, 30)
         res = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=30')
         self.assertEqual(res.status_code, status.HTTP_200_OK, res.content[:200])
         self.assertEqual(res.data['band'], 'hard')
@@ -1230,6 +1242,7 @@ class DailyPuzzleTests(APITestCase):
         self.assertNotEqual(nxt['id'], daily['id'])
         self.assertEqual(nxt['level'], 1)
         # Level 8 of the theme is its own board, not the daily one.
+        unlock(self.user, self.theme, 8)
         lv = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=8').data
         self.assertNotEqual(lv['id'], daily['id'])
 
@@ -1412,3 +1425,127 @@ class ChallengeTests(APITestCase):
         self.client.force_authenticate(self.ivy)
         res = self.client.get(f'/api/puzzles/{self.puzzle.id}/versus/?user=zed')
         self.assertEqual(res.status_code, 404)
+
+
+class HardeningTests(APITestCase):
+    """The holes found in the October scan, kept shut."""
+
+    @classmethod
+    def setUpTestData(cls):
+        seed_wide_corpus()
+        PuzzleTheme.objects.update(is_active=False)
+        cls.theme = PuzzleTheme.objects.create(
+            name='Wide hardening', slug='wide-hardening', order=1,
+            source={'kind': 'passage', 'book': 'Psalms', 'chapter': 119},
+        )
+
+    def setUp(self):
+        cache.clear()
+        reset_theme_words()
+        reset_dictionary()
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        self.client.force_authenticate(self.user)
+
+    def test_a_level_past_the_next_one_is_locked(self):
+        res = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level=9999')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(res.data['code'], 'locked')
+        self.assertFalse(WordPuzzle.objects.filter(level=9999).exists())
+
+    def test_the_next_level_and_finished_ones_open(self):
+        self.assertEqual(self.client.get(
+            f'/api/puzzles/level/?theme={self.theme.slug}&level=1').status_code, 200)
+        unlock(self.user, self.theme, 3)
+        for level in (1, 2, 3):
+            res = self.client.get(f'/api/puzzles/level/?theme={self.theme.slug}&level={level}')
+            self.assertEqual(res.status_code, 200, (level, res.data))
+        self.assertEqual(self.client.get(
+            f'/api/puzzles/level/?theme={self.theme.slug}&level=5').status_code, 403)
+
+    def test_a_daily_board_opened_by_id_starts_the_clock(self):
+        daily = self.client.get('/api/puzzles/daily/').data
+        other = User.objects.create_user('ivy', 'i@x.com', 'pw12345!')
+        self.client.force_authenticate(other)
+        self.client.get(f"/api/puzzles/{daily['id']}/")
+        self.assertTrue(PuzzleProgress.objects.filter(user=other, puzzle_id=daily['id']).exists())
+
+    def test_boards_fit_a_phone(self):
+        from songs.puzzle import MAX_SPAN
+        for level in range(1, 31):
+            try:
+                puzzle = generate(self.theme, level, force=True)
+            except ValueError:
+                continue
+            self.assertLessEqual(len(puzzle.grid), MAX_SPAN, level)
+            self.assertLessEqual(len(puzzle.grid[0]), MAX_SPAN, level)
+
+    def test_a_finished_swahili_board_shows_its_verse_on_reload(self):
+        from songs.models import BibleText
+        from songs.serializers.puzzle import WordPuzzleSerializer
+        text = BibleText.objects.create(version='swh_bib', book='Zaburi', book_number=19,
+                                        chapter=23, verse=1, text='Bwana ndiye mchungaji wangu')
+        puzzle = generate(self.theme, 1)
+        puzzle.language, puzzle.verse, puzzle.sw_verse = 'sw', None, text
+        progress = PuzzleProgress.objects.create(user=self.user, puzzle=puzzle, is_complete=True,
+                                                 completed_at=timezone.now())
+        puzzle._progress_cache = progress
+        request = type('R', (), {'user': self.user})()
+        data = WordPuzzleSerializer(puzzle, context={'request': request}).data
+        self.assertEqual(data['verse']['text'], 'Bwana ndiye mchungaji wangu')
+
+
+class SignatureWordTests(APITestCase):
+    """A theme's boards spell the theme: the Gospels give MARK and LUKE."""
+
+    def setUp(self):
+        reset_theme_words()
+        reset_dictionary()
+
+    def test_a_book_theme_is_about_its_books(self):
+        from songs.puzzle_signatures import signature_words
+        gospels = PuzzleTheme(name='Gospels', slug='gospels-x',
+                              source={'kind': 'books', 'first': 40, 'last': 43})
+        words = signature_words(gospels)
+        for name in ('MATTHEW', 'MARK', 'LUKE', 'JOHN'):
+            self.assertIn(name, words)
+        law = PuzzleTheme(name='Law', slug='books-of-the-law',
+                          source={'kind': 'books', 'first': 1, 'last': 5})
+        words = signature_words(law)
+        self.assertEqual(words[:5], ['GENESIS', 'EXODUS', 'LEVITICUS', 'NUMBERS', 'DEUTERONOMY'])
+        self.assertIn('MOSES', words)
+
+    def test_an_admins_words_come_first(self):
+        from songs.puzzle_signatures import signature_words
+        theme = PuzzleTheme(name='Ruth', slug='ruth-x',
+                            source={'kind': 'passage', 'book': 'Ruth', 'chapter': 1,
+                                    'words': 'Naomi, Boaz,  moab'})
+        self.assertEqual(signature_words(theme)[:3], ['NAOMI', 'BOAZ', 'MOAB'])
+
+    def test_a_signature_word_the_wheel_can_spell_is_on_the_board(self):
+        seed_wide_corpus()
+        theme = PuzzleTheme.objects.create(
+            name='Paths', slug='paths-sig',
+            source={'kind': 'passage', 'book': 'Psalms', 'chapter': 119, 'words': ['TEAM', 'KING']},
+        )
+        boards = [generate(theme, n) for n in range(1, 6)]
+        hits = [b for b in boards if {'TEAM', 'KING'} & set(b.words)]
+        spellable = [b for b in boards if any(not (Counter(w) - Counter(b.letters)) for w in ('TEAM', 'KING'))]
+        self.assertTrue(spellable, 'the corpus should give at least one wheel holding TEAM or KING')
+        self.assertEqual(len(hits), len(spellable))
+
+
+class RebuildCommandTests(APITestCase):
+    def test_only_unopened_levels_are_rebuilt(self):
+        from io import StringIO
+        from django.core.management import call_command
+        seed_wide_corpus()
+        theme = PuzzleTheme.objects.create(name='Rebuild', slug='rebuild-x',
+                                           source={'kind': 'passage', 'book': 'Psalms', 'chapter': 119})
+        played, untouched = generate(theme, 1), generate(theme, 2)
+        user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        PuzzleProgress.objects.create(user=user, puzzle=played)
+        WordPuzzle.objects.filter(pk=played.pk).update(letters='ZZZZZ')
+        WordPuzzle.objects.filter(pk=untouched.pk).update(letters='ZZZZZ')
+        call_command('rebuild_puzzle_levels', stdout=StringIO())
+        self.assertEqual(WordPuzzle.objects.get(pk=played.pk).letters, 'ZZZZZ')
+        self.assertNotEqual(WordPuzzle.objects.get(pk=untouched.pk).letters, 'ZZZZZ')

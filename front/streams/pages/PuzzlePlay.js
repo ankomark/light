@@ -65,6 +65,25 @@ const KNOB_SHARE = 0.20;    // of the wheel — eight of these still fit its rim
 const TILE_MAX = 38;        // a tile is never bigger than this
 const TILE_MIN = 15;        // nor smaller — below this a letter stops reading
 
+/** Which pick a prefetched board answers: the server's next ('next'), or a
+ *  theme's level. A daily or a friend's board is never prefetched. */
+const nextKey = (choice) => (!choice ? 'next'
+  : choice.theme ? `${choice.theme}:${choice.level}` : null);
+
+/** A theme's level — or, when the server says it is not open yet (the one
+ *  before it never finished there), the level it says is next. */
+const fetchLevelOrNext = async (theme, level, lang) => {
+  try {
+    return await fetchPuzzleLevel(theme, level, lang);
+  } catch (e) {
+    const data = e?.response?.data || e?.data || {};
+    if (data.code === 'locked' && data.next_level && data.next_level !== level) {
+      return fetchPuzzleLevel(theme, data.next_level, lang);
+    }
+    throw e;
+  }
+};
+
 const PuzzlePlay = ({ navigation, route }) => {
   const { t, resolvedLanguage } = useI18n();
   const { currentUser } = useAuth();
@@ -114,15 +133,27 @@ const PuzzlePlay = ({ navigation, route }) => {
   // Finds go to the server one after another, behind the play; the next
   // level is fetched the moment this one is finished, so "Next" is instant.
   const chain = useRef(Promise.resolve());
+  // { key, data }: the board "Next" will open, fetched while this one was
+  // being finished. `key` says which pick it answers (see nextKey).
   const upcoming = useRef(null);
+  const puzzleRef = useRef(null);
   const walletRef = useRef(streak);
   walletRef.current = streak;
   // The wheel's own order, so Shuffle can rearrange it without touching the
   // puzzle: the letters are the same, only where they sit changes.
   // Starts from the kept board, if the screen opened on one, so Shuffle works at once.
   const [order, setOrder] = useState(() => (kept ? [...Array((kept.letters || '').length).keys()] : []));
-  // Where the finger is, in wheel coordinates — the loose end of the line.
-  const [pointer, setPointer] = useState(null);
+  // The loose end of the line, out to the fingertip. Moved with Animated
+  // values set straight on the native view: a finger reports sixty times a
+  // second, and re-rendering the whole board for each report is what made the
+  // line stutter behind it.
+  const loose = useRef({
+    left: new Animated.Value(0), top: new Animated.Value(0),
+    width: new Animated.Value(0), angle: new Animated.Value(0), opacity: new Animated.Value(0),
+  }).current;
+  const looseRotate = useMemo(() => loose.angle.interpolate({
+    inputRange: [-Math.PI, Math.PI], outputRange: [`${-Math.PI}rad`, `${Math.PI}rad`],
+  }), [loose]);
   // How tall the board's area turned out to be. Tiles are sized to fit it, so
   // a big board shrinks rather than running off the bottom of the screen.
   const [viewport, setViewport] = useState(0);
@@ -160,7 +191,11 @@ const PuzzlePlay = ({ navigation, route }) => {
     return { wheel: size, knob: k, hit: k * 0.72 };
   }, [width, height]);
 
+  // Where the wheel sits on screen, taken at the start of every touch from
+  // the touch itself (page position less position within the wheel), so it
+  // is right under Android's status bar and after anything above it moves.
   const wheelBox = useRef({ x: 0, y: 0 });
+  const lastPoint = useRef(null);
   const tracedRef = useRef([]);
   // Words the server has already turned down on this board. Retracing one is
   // the commonest repeat there is, and answering it here means the "no" is
@@ -224,8 +259,8 @@ const PuzzlePlay = ({ navigation, route }) => {
     // A word refused on one board may well be an answer on the next.
     refused.current = new Set();
     // The next level, fetched while this one was being finished: no wait.
-    if (!choice && upcoming.current) {
-      show(upcoming.current);
+    if (upcoming.current && upcoming.current.key === nextKey(choice)) {
+      show(upcoming.current.data);
       upcoming.current = null;
       setLoading(false);
       return;
@@ -234,9 +269,12 @@ const PuzzlePlay = ({ navigation, route }) => {
     const current = key && peekCache(key);
     if (current) show(current, { keep: false }); else setLoading(true);
     try {
+      // A level off the map opens only once the one before it is finished on
+      // the server: let finds still on their way land first.
+      if (choice?.theme) await chain.current.catch(() => {});
       const data = choice?.daily ? await fetchDailyPuzzle(lang)
         : choice?.id ? await fetchPuzzle(choice.id, { from: choice.from })
-          : choice ? await fetchPuzzleLevel(choice.theme, choice.level, lang)
+          : choice ? await fetchLevelOrNext(choice.theme, choice.level, lang)
             : await fetchNextPuzzle(lang);
       show(data);
     } catch {
@@ -345,11 +383,18 @@ const PuzzlePlay = ({ navigation, route }) => {
     setTimeout(() => setToast(''), 2200);
   }, []);
 
+  puzzleRef.current = puzzle;
+  const pickTile = useCallback((at) => {
+    tapFeedback();
+    setPicked((now) => (now === at ? null : at));
+  }, []);
   const source = (puzzle?.letters || '').split('');
   // What the wheel shows, in its current arrangement.
   const letters = order.length === source.length ? order.map((i) => source[i]) : source;
-  const found = puzzle?.found || [];
-  const bonus = puzzle?.bonus || [];
+  // Kept stable between renders so the board (memoised below) redraws only
+  // when something on it changes.
+  const found = useMemo(() => puzzle?.found || [], [puzzle?.found]);
+  const bonus = useMemo(() => puzzle?.bonus || [], [puzzle?.bonus]);
 
   const shuffle = () => {
     tapFeedback();
@@ -462,8 +507,14 @@ const PuzzlePlay = ({ navigation, route }) => {
             ...(res.seconds != null ? { seconds: res.seconds, stars: res.stars } : {}),
           } : prev));
         }
-        if ((finishing || res.is_complete) && !pickRef.current?.theme) {
-          fetchNextPuzzle(lang).then((next) => { upcoming.current = next; }).catch(() => {});
+        if (finishing || res.is_complete) {
+          // What "Next" will open, fetched now so it opens at once: the
+          // theme's next level for one off the map, otherwise the server's pick.
+          const was = pickRef.current;
+          const after = was?.theme ? { theme: was.theme, level: (puzzleRef.current?.level || 0) + 1 } : null;
+          (after ? fetchLevelOrNext(after.theme, after.level, lang) : fetchNextPuzzle(lang))
+            .then((next) => { upcoming.current = { key: nextKey(after), data: next }; })
+            .catch(() => {});
         }
       })
       .catch(() => {
@@ -529,7 +580,6 @@ const PuzzlePlay = ({ navigation, route }) => {
     // up. Waiting for the server before clearing is what makes these games feel
     // sluggish.
     setTraced([]);
-    setPointer(null);
     if (!puzzle || attempt.length < 3) return;
     if (claimed.has(attempt) || refused.current.has(attempt)) { reject(); return; }
 
@@ -604,16 +654,57 @@ const PuzzlePlay = ({ navigation, route }) => {
     }
   }, [puzzle, letters, claimed, reject, addCoins, streak, record, solvedNow]);
 
-  const knobAt = (pageX, pageY) => {
-    const x = pageX - wheelBox.current.x;
-    const y = pageY - wheelBox.current.y;
-    for (let i = 0; i < knobs.length; i += 1) {
-      const dx = x - knobs[i].x;
-      const dy = y - knobs[i].y;
-      if (Math.sqrt(dx * dx + dy * dy) <= hit) return i;
+  const knobsRef = useRef(knobs);
+  knobsRef.current = knobs;
+  const hitRef = useRef(hit);
+  hitRef.current = hit;
+
+  /** The knob under a point in wheel coordinates, or -1. */
+  const knobAt = (x, y) => {
+    const spots = knobsRef.current;
+    const reach = hitRef.current * hitRef.current;
+    for (let i = 0; i < spots.length; i += 1) {
+      const dx = x - spots[i].x;
+      const dy = y - spots[i].y;
+      if (dx * dx + dy * dy <= reach) return i;
     }
     return -1;
   };
+
+  /** The line from the last letter out to the finger. */
+  const drawLoose = (x, y) => {
+    const current = tracedRef.current;
+    const from = knobsRef.current[current[current.length - 1]];
+    if (!from || x == null) { loose.opacity.setValue(0); return; }
+    const dx = x - from.x;
+    const dy = y - from.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    loose.width.setValue(length);
+    loose.left.setValue((from.x + x) / 2 - length / 2);
+    loose.top.setValue((from.y + y) / 2 - LINK / 2);
+    loose.angle.setValue(Math.atan2(dy, dx));
+    loose.opacity.setValue(length < 2 ? 0 : 0.55);
+  };
+
+  /** Follow the finger from where it was to where it is. A quick swipe
+   *  reports points far apart and could jump straight over a letter; the
+   *  path between them is walked in small steps so none is missed. */
+  const follow = (x, y) => {
+    const prev = lastPoint.current || { x, y };
+    const dist = Math.sqrt((x - prev.x) ** 2 + (y - prev.y) ** 2);
+    const n = Math.min(24, Math.ceil(dist / Math.max(4, hitRef.current / 3)));
+    for (let k = 1; k <= n; k += 1) {
+      extend(knobAt(prev.x + ((x - prev.x) * k) / n, prev.y + ((y - prev.y) * k) / n));
+    }
+    if (!n) extend(knobAt(x, y));
+    lastPoint.current = { x, y };
+    drawLoose(x, y);
+  };
+
+  const localPoint = (e) => ({
+    x: e.nativeEvent.pageX - wheelBox.current.x,
+    y: e.nativeEvent.pageY - wheelBox.current.y,
+  });
 
   const extend = (index) => {
     if (index < 0) return;
@@ -673,20 +764,18 @@ const PuzzlePlay = ({ navigation, route }) => {
     endTapping();
   };
 
-  const trackPointer = (e) => {
-    setPointer({
-      x: e.nativeEvent.pageX - wheelBox.current.x,
-      y: e.nativeEvent.pageY - wheelBox.current.y,
-    });
-  };
-
   const responder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
       gestureKnobs.current = 0;
-      trackPointer(e);
-      const at = knobAt(e.nativeEvent.pageX, e.nativeEvent.pageY);
+      const { pageX, pageY, locationX, locationY } = e.nativeEvent;
+      if (locationX != null && locationY != null) {
+        wheelBox.current = { x: pageX - locationX, y: pageY - locationY };
+      }
+      const point = localPoint(e);
+      lastPoint.current = point;
+      const at = knobAt(point.x, point.y);
       if (tapping.current) {
         // Mid-way through tapping a word: this touch carries it on.
         const current = tracedRef.current;
@@ -699,13 +788,15 @@ const PuzzlePlay = ({ navigation, route }) => {
         tracedRef.current = [];
       }
       extend(at);
+      drawLoose(point.x, point.y);
     },
     onPanResponderMove: (e) => {
-      trackPointer(e);
-      extend(knobAt(e.nativeEvent.pageX, e.nativeEvent.pageY));
+      const point = localPoint(e);
+      follow(point.x, point.y);
     },
     onPanResponderRelease: () => {
-      setPointer(null);
+      lastPoint.current = null;
+      drawLoose(null);
       if (gestureKnobs.current >= 2) {
         // A drag across the letters: that is the word.
         const picked = tracedRef.current;
@@ -719,13 +810,16 @@ const PuzzlePlay = ({ navigation, route }) => {
       tapping.current = on;
       setTapMode(on);
     },
+    // A drag across the wheel is never handed to the screen's back swipe.
+    onPanResponderTerminationRequest: () => false,
     onPanResponderTerminate: () => {
       tracedRef.current = [];
       setTraced([]);
-      setPointer(null);
+      lastPoint.current = null;
+      drawLoose(null);
       endTapping();
     },
-  }), [submit, knobs.length, reader]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [submit, reader]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** One letter, on the tile picked: the cheap hint. */
   const buyLetter = async () => {
@@ -733,6 +827,9 @@ const PuzzlePlay = ({ navigation, route }) => {
     const [row, col] = picked.split(',').map(Number);
     try {
       setBusy(true);
+      // Finds still on their way first: the server must know what is
+      // already showing before it sells a letter of it.
+      await chain.current.catch(() => {});
       const res = await buyPuzzleLetter(puzzle.id, row, col);
       setBalance(res.balance);
       setPuzzle((prev) => ({
@@ -759,6 +856,9 @@ const PuzzlePlay = ({ navigation, route }) => {
     if (!puzzle || busy) return;
     try {
       setBusy(true);
+      // Finds still on their way first: otherwise the server, not yet told
+      // of a word just traced, could sell it back as the hint.
+      await chain.current.catch(() => {});
       const res = await buyPuzzleHint(puzzle.id);
       setBalance(res.balance);
       setPuzzle((prev) => ({
@@ -777,17 +877,33 @@ const PuzzlePlay = ({ navigation, route }) => {
     }
   };
 
+  // This screen has no app header, so the way out has to be drawn even while
+  // nothing else is — a first open offline would otherwise be a dead end.
+  const backOnly = (
+    <TouchableOpacity
+      onPress={() => navigation.goBack()}
+      style={[styles.backBtn, styles.backAlone]}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel={t('common.back')}
+    >
+      <Ionicons name="chevron-back" size={24} color={PARCHMENT} />
+    </TouchableOpacity>
+  );
+
   if (loading) {
     return (
-      <View style={q.rootClear}>
+      <SafeAreaView style={q.rootClear} edges={['top', 'bottom']}>
+        {backOnly}
         <View style={q.centered}><ActivityIndicator size="large" color={GOLD} /></View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (!puzzle) {
     return (
-      <View style={q.rootClear}>
+      <SafeAreaView style={q.rootClear} edges={['top', 'bottom']}>
+        {backOnly}
         <View style={q.flex}>
           <View style={q.centered}>
             <Ionicons name="grid-outline" size={42} color={MUTED} />
@@ -798,7 +914,7 @@ const PuzzlePlay = ({ navigation, route }) => {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -809,7 +925,10 @@ const PuzzlePlay = ({ navigation, route }) => {
   const rows = Math.max(1, puzzle.rows);
   const fitsWide = Math.floor((width - 40) / cols);
   const fitsTall = viewport ? Math.floor((viewport - 16) / rows) : TILE_MAX;
-  const tile = Math.max(TILE_MIN, Math.min(TILE_MAX, fitsWide, fitsTall));
+  // Never wider than the screen: the minimum gives way before a board does
+  // (an older, sprawling level on a narrow phone), since a tile cut off the
+  // edge cannot be read at any size.
+  const tile = Math.min(fitsWide, Math.max(TILE_MIN, Math.min(TILE_MAX, fitsTall)));
   const remaining = puzzle.slots.length - found.length;
   const hintCost = streak?.hint_cost ?? 15;
   const letterCost = streak?.letter_cost ?? 5;
@@ -893,65 +1012,20 @@ const PuzzlePlay = ({ navigation, route }) => {
           showsVerticalScrollIndicator={false}
           onLayout={(e) => setViewport(e.nativeEvent.layout.height)}
         >
-          <View style={styles.board}>
-            {(puzzle.layout || []).map((row, r) => (
-              <View style={styles.boardRow} key={`r${r}`}>
-                {row.split('').map((mark, c) => {
-                  if (mark !== '#') {
-                    return <View key={`${r},${c}`} style={{ width: tile, height: tile }} />;
-                  }
-                  const at = `${r},${c}`;
-                  const cell = revealedCells[at];
-                  const isPicked = picked === at;
-                  // The finish: a wave from the top left, each tile in turn.
-                  const wave = ((r + c) / (rows + cols)) * 0.6;
-                  const lit = cell?.solid ? {
-                    transform: [{
-                      scale: celebrate.interpolate({
-                        inputRange: [0, wave, wave + 0.2, wave + 0.4, 1],
-                        outputRange: [1, 1, 1.22, 1, 1],
-                        extrapolate: 'clamp',
-                      }),
-                    }],
-                  } : null;
-                  const face = (
-                    <Animated.View
-                      style={[
-                        styles.tile,
-                        { width: tile - 3, height: tile - 3, margin: 1.5 },
-                        cell?.solid && styles.tileFound,
-                        cell && !cell.solid && styles.tileHinted,
-                        isPicked && styles.tilePicked,
-                        lit,
-                      ]}
-                    >
-                      {!!cell && (
-                        <Text style={[styles.tileText, { fontSize: tile * 0.46 }]}>
-                          {cell.letter}
-                        </Text>
-                      )}
-                      {isPicked && busy && <ActivityIndicator size="small" color={INK} />}
-                    </Animated.View>
-                  );
-                  // A blank tile can be tapped for its letter.
-                  if (cell || puzzle.is_complete) return <React.Fragment key={at}>{face}</React.Fragment>;
-                  return (
-                    <Pressable
-                      key={at}
-                      onPress={() => { tapFeedback(); setPicked(isPicked ? null : at); }}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isPicked }}
-                      accessibilityLabel={t('puzzle.a11y.tile', { row: r + 1, col: c + 1 })}
-                      accessibilityHint={t('puzzle.a11y.tileHint', { cost: letterCost })}
-                      testID={`tile-${at}`}
-                    >
-                      {face}
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ))}
-          </View>
+          <Board
+            layout={puzzle.layout}
+            revealedCells={revealedCells}
+            picked={picked}
+            tile={tile}
+            rows={rows}
+            cols={cols}
+            complete={!!puzzle.is_complete}
+            busy={busy}
+            celebrate={celebrate}
+            onPick={pickTile}
+            t={t}
+            letterCost={letterCost}
+          />
           {/* A finished board: how it was won, the verse it came from, and
               what can be done with it. */}
           {(puzzle.is_complete || !!puzzle.verse) && (
@@ -1092,9 +1166,6 @@ const PuzzlePlay = ({ navigation, route }) => {
           )}
           <View
             style={[styles.wheel, { width: wheel, height: wheel, borderRadius: wheel / 2 }]}
-            ref={(node) => {
-              if (node) node.measureInWindow((x, y) => { wheelBox.current = { x, y }; });
-            }}
             {...responder.panHandlers}
             // A screen reader has the letter buttons below instead.
             accessibilityElementsHidden={reader}
@@ -1104,22 +1175,18 @@ const PuzzlePlay = ({ navigation, route }) => {
                 of chosen letters, and a loose one out to the fingertip. */}
             {traced.map((knobIndex, n) => {
               const from = knobs[knobIndex];
-              const to = n + 1 < traced.length
-                ? knobs[traced[n + 1]]
-                : (pointer && n === traced.length - 1 ? pointer : null);
+              const to = n + 1 < traced.length ? knobs[traced[n + 1]] : null;
               if (!from || !to) return null;
               const dx = to.x - from.x;
               const dy = to.y - from.y;
               const length = Math.sqrt(dx * dx + dy * dy);
               if (length < 1) return null;
-              const loose = n === traced.length - 1 && to === pointer;
               return (
                 <View
                   key={`link-${n}`}
                   pointerEvents="none"
                   style={[
                     styles.link,
-                    loose && styles.linkLoose,
                     {
                       width: length,
                       left: (from.x + to.x) / 2 - length / 2,
@@ -1130,6 +1197,14 @@ const PuzzlePlay = ({ navigation, route }) => {
                 />
               );
             })}
+
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.link, {
+                left: loose.left, top: loose.top, width: loose.width, opacity: loose.opacity,
+                transform: [{ rotate: looseRotate }],
+              }]}
+            />
 
             {!word && (
               <View style={styles.wheelHint} pointerEvents="none">
@@ -1293,6 +1368,74 @@ const PuzzlePlay = ({ navigation, route }) => {
   );
 };
 
+/** The board: tiles and the letters earned on them. Its own component, kept
+ *  apart from the wheel, so tracing a letter does not redraw every tile —
+ *  a word's worth of letters used to repaint the whole grid each time. */
+const Board = React.memo(({
+  layout, revealedCells, picked, tile, rows, cols, complete, busy, celebrate, onPick, t, letterCost,
+}) => (
+  <View style={styles.board}>
+    {(layout || []).map((row, r) => (
+      <View style={styles.boardRow} key={`r${r}`}>
+        {row.split('').map((mark, c) => {
+          if (mark !== '#') {
+            return <View key={`${r},${c}`} style={{ width: tile, height: tile }} />;
+          }
+          const at = `${r},${c}`;
+          const cell = revealedCells[at];
+          const isPicked = picked === at;
+          // The finish: a wave from the top left, each tile in turn.
+          const wave = ((r + c) / (rows + cols)) * 0.6;
+          const lit = cell?.solid ? {
+            transform: [{
+              scale: celebrate.interpolate({
+                inputRange: [0, wave, wave + 0.2, wave + 0.4, 1],
+                outputRange: [1, 1, 1.22, 1, 1],
+                extrapolate: 'clamp',
+              }),
+            }],
+          } : null;
+          const face = (
+            <Animated.View
+              style={[
+                styles.tile,
+                { width: tile - 3, height: tile - 3, margin: 1.5 },
+                cell?.solid && styles.tileFound,
+                cell && !cell.solid && styles.tileHinted,
+                isPicked && styles.tilePicked,
+                lit,
+              ]}
+            >
+              {!!cell && (
+                <Text style={[styles.tileText, { fontSize: tile * 0.46 }]}>
+                  {cell.letter}
+                </Text>
+              )}
+              {isPicked && busy && <ActivityIndicator size="small" color={INK} />}
+            </Animated.View>
+          );
+          // A blank tile can be tapped for its letter.
+          if (cell || complete) return <React.Fragment key={at}>{face}</React.Fragment>;
+          return (
+            <Pressable
+              key={at}
+              onPress={() => onPick(at)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isPicked }}
+              accessibilityLabel={t('puzzle.a11y.tile', { row: r + 1, col: c + 1 })}
+              accessibilityHint={t('puzzle.a11y.tileHint', { cost: letterCost })}
+              testID={`tile-${at}`}
+            >
+              {face}
+            </Pressable>
+          );
+        })}
+      </View>
+    ))}
+  </View>
+));
+Board.displayName = 'PuzzleBoard';
+
 const LINK = 7;   // thickness of the connecting line
 
 const styles = StyleSheet.create({
@@ -1301,6 +1444,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingTop: 2, paddingBottom: 4,
   },
   backBtn: { paddingRight: 10, paddingVertical: 4 },
+  backAlone: { alignSelf: 'flex-start', paddingHorizontal: 16, paddingVertical: 8 },
   barMid: { flex: 1 },
   // The levels never stop, so the band is what tells you how far in you are.
   band: { color: GOLD },
@@ -1320,7 +1464,6 @@ const styles = StyleSheet.create({
     position: 'absolute', height: LINK, borderRadius: LINK / 2,
     backgroundColor: GOLD,
   },
-  linkLoose: { opacity: 0.55 },
   stars: { fontSize: 22, letterSpacing: 4, color: GOLD },
   versus: {
     alignSelf: 'stretch', marginTop: 8, padding: 12, borderRadius: 12, gap: 6,

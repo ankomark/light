@@ -1339,8 +1339,11 @@ export const fetchPuzzleThemes = async (lang) => apiRequest('get', `/puzzle-them
 export const fetchPuzzleLevels = async (slug, lang) =>
   apiRequest('get', `/puzzle-themes/${encodeURIComponent(slug)}/levels/${langQuery(lang)}`);
 
+// A find is tiny and the game queues the next behind it, so it gives up
+// quickly on a dead connection (and is kept to send again) rather than
+// holding every later find for the default minute.
 export const claimPuzzleWord = async (puzzleId, word) =>
-  apiRequest('post', `/puzzles/${puzzleId}/found/`, { word });
+  apiRequest('post', `/puzzles/${puzzleId}/found/`, { word }, { timeout: 12000 });
 
 export const buyPuzzleHint = async (puzzleId) =>
   apiRequest('post', `/puzzles/${puzzleId}/hint/`, {});

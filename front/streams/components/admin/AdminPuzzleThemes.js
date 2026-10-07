@@ -6,7 +6,9 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, Modal, ScrollView, Switch,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
@@ -24,6 +26,9 @@ const firstError = (e) => {
   return Array.isArray(value) ? value[0] : (typeof value === 'string' ? value : null);
 };
 
+/** ["MOSES", "SINAI"] ↔ "MOSES, SINAI": theme words as one editable line. */
+const wordLine = (words) => (Array.isArray(words) ? words.join(', ') : (words || ''));
+
 /** "Books 1–5", "Psalms 23", "faith": where a theme's words come from. */
 const sourceText = (source = {}, t) => {
   if (source.kind === 'books') return t('adminPuzzle.fromBooks', { first: source.first, last: source.last });
@@ -40,6 +45,7 @@ export default function AdminPuzzleThemes() {
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const insets = useSafeAreaInsets();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,9 +94,22 @@ export default function AdminPuzzleThemes() {
     setSaving(true);
     setError('');
     try {
+      // The theme words and the Swahili term stay editable once a theme has
+      // levels (they only shape levels still to come); the rest of the source
+      // is sent back unchanged.
+      // A list left empty is sent empty only when it was there before
+      // (that clears it); otherwise it is left out.
+      const source = { ...draft.source };
+      ['words', 'words_sw'].forEach((k) => {
+        const line = wordLine(source[k]);
+        if (line || k in source) source[k] = line; else delete source[k];
+      });
       const body = draft.id
-        ? { id: draft.id, name: draft.name, name_sw: draft.name_sw, description: draft.description, description_sw: draft.description_sw }
-        : draft;
+        ? {
+          id: draft.id, name: draft.name, name_sw: draft.name_sw, description: draft.description,
+          description_sw: draft.description_sw, source,
+        }
+        : { ...draft, source };
       replace(await savePuzzleTheme(body));
       setDraft(null);
     } catch (e) {
@@ -148,8 +167,8 @@ export default function AdminPuzzleThemes() {
       )}
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
-        <View style={styles.backdrop}>
-          <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: 28 }}
+        <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: 28 + insets.bottom }}
                       keyboardShouldPersistTaps="handled" testID="theme-editor">
             <Text style={styles.sheetTitle}>{draft?.id ? t('adminPuzzle.edit') : t('adminPuzzle.new')}</Text>
             {draft && (
@@ -164,7 +183,14 @@ export default function AdminPuzzleThemes() {
                            placeholderTextColor="#5E7290" onChangeText={(v) => setDraft((d) => ({ ...d, description_sw: v }))} />
                 <Text style={styles.label}>{t('adminPuzzle.wordsFrom')}</Text>
                 {draft.id ? (
-                  <Text style={styles.sub}>{sourceText(draft.source, t)}  ·  {t('adminPuzzle.sourceFixed')}</Text>
+                  <>
+                    <Text style={styles.sub}>{sourceText(draft.source, t)}  ·  {t('adminPuzzle.sourceFixed')}</Text>
+                    {draft.source?.kind === 'topic' && (
+                      <TextInput style={styles.input} value={draft.source.term_sw || ''} placeholder={t('adminPuzzle.termSw')}
+                                 placeholderTextColor="#5E7290" onChangeText={(v) => setSource({ term_sw: v })}
+                                 testID="theme-term-sw" />
+                    )}
+                  </>
                 ) : (
                   <>
                     <View style={styles.chips}>
@@ -204,6 +230,19 @@ export default function AdminPuzzleThemes() {
                     )}
                   </>
                 )}
+                <Text style={styles.label}>{t('adminPuzzle.themeWords')}</Text>
+                <Text style={styles.sub}>{t('adminPuzzle.themeWordsHint')}</Text>
+                {!!draft.theme_words?.en?.length && (
+                  <Text style={styles.sub} numberOfLines={3}>
+                    {t('adminPuzzle.autoWords', { words: draft.theme_words.en.slice(0, 24).join(', ') })}
+                  </Text>
+                )}
+                <TextInput style={[styles.input, styles.multi]} multiline value={wordLine(draft.source?.words)}
+                           placeholder={t('adminPuzzle.wordsEn')} placeholderTextColor="#5E7290" autoCapitalize="characters"
+                           onChangeText={(v) => setSource({ words: v })} testID="theme-words" />
+                <TextInput style={[styles.input, styles.multi]} multiline value={wordLine(draft.source?.words_sw)}
+                           placeholder={t('adminPuzzle.wordsSw')} placeholderTextColor="#5E7290" autoCapitalize="characters"
+                           onChangeText={(v) => setSource({ words_sw: v })} testID="theme-words-sw" />
                 {!!error && <Text style={styles.error} testID="theme-error">{error}</Text>}
                 <TouchableOpacity style={[styles.save, saving && { opacity: 0.6 }]} onPress={save} disabled={saving} testID="theme-save">
                   {saving ? <ActivityIndicator color={ADMIN.onGold} /> : <Text style={styles.saveText}>{t('adminPuzzle.save')}</Text>}
@@ -214,7 +253,7 @@ export default function AdminPuzzleThemes() {
               </>
             )}
           </ScrollView>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -244,6 +283,7 @@ const styles = StyleSheet.create({
     backgroundColor: ADMIN.field, borderWidth: 1, borderColor: '#1E3150',
   },
   pair: { flexDirection: 'row', gap: 8 },
+  multi: { minHeight: 64, paddingTop: 10, textAlignVertical: 'top' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: ADMIN.card,

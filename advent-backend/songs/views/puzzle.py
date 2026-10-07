@@ -202,8 +202,21 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         if not 1 <= level <= LEVEL_LIMIT:
             raise ValidationError({'level': 'That is not a level.'})
 
+        language = _language(request)
+        # Only what the map offers: a finished level, the next one, or one
+        # already started. Without this, level 9999 was one request away —
+        # and its completion bonus is 50,000 coins.
+        mine = PuzzleProgress.objects.filter(
+            user=request.user, puzzle__theme=theme, puzzle__day__isnull=True,
+            puzzle__language=language,
+        )
+        furthest = mine.filter(is_complete=True).aggregate(n=Max('puzzle__level'))['n'] or 0
+        if level > furthest + 1 and not mine.filter(puzzle__level=level).exists():
+            return Response({'error': 'Finish the levels before this one first.', 'code': 'locked',
+                             'next_level': furthest + 1}, status=status.HTTP_403_FORBIDDEN)
+
         try:
-            puzzle = generate(theme, level, language=_language(request))
+            puzzle = generate(theme, level, language=language)
         except ValueError as exc:
             # The theme cannot supply enough words — a real failure, not an
             # undersized puzzle that still pays a completion bonus.
@@ -235,7 +248,10 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         Opening a challenge starts the clock, and the sender hears how it went.
         """
         puzzle = get_object_or_404(self.get_queryset(), pk=pk)
-        progress = self._progress(puzzle, create=False)
+        # A Daily Puzzle opened by its id starts the clock just as /daily/
+        # does — otherwise the board (and its word keys) could be read here
+        # with no clock running and every word sent in a second later.
+        progress = self._progress(puzzle, create=bool(puzzle.day))
         sender = (request.query_params.get('from') or '').strip()
         if sender and sender != request.user.username:
             challenger = User.objects.filter(username=sender).first()
@@ -482,31 +498,35 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
         is a balance nobody trusts.
         """
         puzzle = get_object_or_404(self.get_queryset(), pk=pk)
-        progress = self._progress(puzzle)
 
-        remaining = [
-            p for p in puzzle.placements
-            if p['word'] not in (progress.found or [])
-            and p['word'] not in (progress.hinted or [])
-        ]
-        if not remaining:
-            return Response(
-                {'error': 'Nothing left to reveal.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        earned, spent, balance = coin_balance(request.user)
-        if balance < HINT_COST:
-            return Response(
-                {'error': 'A hint costs %d coins; you have %d.' % (HINT_COST, balance),
-                 'cost': HINT_COST, 'balance': balance},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # The longest unfound word — the one most likely to be the sticking point.
-        target = max(remaining, key=lambda p: len(p['word']))
-
+        # Locked like `letter`: two taps in flight must not both pass the
+        # balance check and spend the same coins twice.
         with transaction.atomic():
+            progress, _ = PuzzleProgress.objects.select_for_update().get_or_create(
+                user=request.user, puzzle=puzzle,
+            )
+            remaining = [
+                p for p in puzzle.placements
+                if p['word'] not in (progress.found or [])
+                and p['word'] not in (progress.hinted or [])
+            ]
+            if not remaining:
+                return Response(
+                    {'error': 'Nothing left to reveal.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            earned, spent, balance = coin_balance(request.user)
+            if balance < HINT_COST:
+                return Response(
+                    {'error': 'A hint costs %d coins; you have %d.' % (HINT_COST, balance),
+                     'cost': HINT_COST, 'balance': balance},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # The longest unfound word — the one most likely to be the sticking point.
+            target = max(remaining, key=lambda p: len(p['word']))
+
             CoinSpend.objects.create(
                 user=request.user, amount=HINT_COST,
                 reason=CoinSpend.HINT, puzzle=puzzle,

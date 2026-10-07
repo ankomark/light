@@ -2,7 +2,7 @@
 // longest first. Tap a word for what it means, as the Bible uses it — from the
 // glossary of old words, or explained once by the AI and kept (songs/
 // puzzle_words.py). Kept on the phone too, so a word asked twice is instant.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -37,11 +37,15 @@ export default function PuzzleWordsSheet({ visible, onClose, puzzle }) {
   // The word being explained, and what came back: { loading } | { meaning, … } | { error }.
   const [asked, setAsked] = useState(null);
   const [answer, setAnswer] = useState(null);
+  // The word on screen now: an answer that comes back for a word tapped
+  // before it is dropped, not shown under the wrong word.
+  const showing = useRef(null);
   useEffect(() => { if (!visible) { setAsked(null); setAnswer(null); } }, [visible]);
 
   const onWord = (word) => {
-    if (asked === word) { setAsked(null); return; }
+    if (asked === word) { setAsked(null); showing.current = null; return; }
     setAsked(word);
+    showing.current = word;
     const key = `puzzle:meaning:${puzzle?.language || 'en'}:${explainIn}:${word}`;
     const kept = peekCache(key);
     if (kept) { setAnswer(kept); return; }
@@ -49,11 +53,11 @@ export default function PuzzleWordsSheet({ visible, onClose, puzzle }) {
     fetchPuzzleMeaning(puzzle.id, word, explainIn)
       .then((res) => {
         writeCache(key, res);
-        setAnswer((now) => (now?.loading ? res : now));
+        if (showing.current === word) setAnswer(res);
       })
       .catch((e) => {
         const code = (e?.response?.data || e?.data || {}).code;
-        setAnswer({ error: t(MEANING_ERRORS[code] || 'puzzle.meaning.failed') });
+        if (showing.current === word) setAnswer({ error: t(MEANING_ERRORS[code] || 'puzzle.meaning.failed') });
       });
   };
   const found = [...new Set(puzzle?.found || [])].sort(byLength);

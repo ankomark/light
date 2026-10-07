@@ -15,16 +15,20 @@ Deterministic per (theme, level): the seed is the theme slug and the level, so
 a level is the same puzzle for everyone and rebuilding changes nothing.
 """
 import hashlib
+import json
+import math
 import random
 import re
 from collections import Counter
 
 from django.db import IntegrityError, transaction
 
-from django.db.models import Count, Max
+from django.db.models import Count, F, Max
+from django.db.models.functions import Mod
 
 from .bible_books import BOOKS_BY_NAME
 from .models import BibleText, BibleVerse, BibleWord, PuzzleProgress, PuzzleTheme, WordPuzzle
+from .puzzle_signatures import signature_words
 
 MIN_ANSWER = 3          # shortest word the wheel will accept
 BASE_MIN, BASE_MAX = 5, 8   # letters on the wheel
@@ -205,14 +209,64 @@ def _scope(theme, widen=False, language='en'):
     return everything.filter(text__icontains=term)
 
 
-def _count_words(verses):
+def _sample(verses):
+    """Up to about THEME_VERSE_SAMPLE verses spread across the whole scope.
+
+    The first 1,500 rows of a whole-testament theme are its opening books
+    alone — the New Testament was Matthew and Mark — and with no ordering the
+    database could hand back a different 1,500 tomorrow. Every k-th verse by
+    id is both spread out and the same each time.
+    """
+    total = verses.count()
+    if total <= THEME_VERSE_SAMPLE:
+        return verses.order_by('pk')
+    step = -(-total // THEME_VERSE_SAMPLE)
+    return (verses.annotate(_slot=Mod(F('pk'), step)).filter(_slot=0)
+            .order_by('pk'))
+
+
+# A word has to turn up this often in a theme's verses before it can be
+# called characteristic of it — below that, "distinctive" just means rare.
+DISTINCT_MIN_COUNT = 3
+
+
+def _count_words(verses, language='en'):
+    """The theme's words, most characteristic first.
+
+    Ranked by how much more the theme uses a word than scripture at large
+    does, not by raw count: by count, every theme led with THEREFORE and
+    SHALL, and the Gospels read like the Law. Weighed this way the Gospels
+    lead with JESUS and DISCIPLES, Psalm 23 with PASTURES and SHEPHERD.
+    """
     counts = Counter()
-    for text in verses.values_list('text', flat=True)[:THEME_VERSE_SAMPLE]:
+    for text in _sample(verses).values_list('text', flat=True)[:THEME_VERSE_SAMPLE]:
         for raw in text.split():
             word = _clean(raw)
             if BASE_MIN <= len(word) <= BASE_MAX:
                 counts[word] += 1
-    return [w for w, _ in counts.most_common()]
+    if not counts:
+        return []
+    corpus = {}
+    names = list(counts)
+    for i in range(0, len(names), 500):
+        corpus.update(BibleWord.objects.filter(language=language, word__in=names[i:i + 500])
+                      .values_list('word', 'frequency'))
+
+    # A wheel's own word always goes on the board, so it has to be a word a
+    # player could think of: in the index (which leaves out SAITH, SHALT and
+    # the other archaisms on purpose) and common enough not to be a name like
+    # ESROM. The theme's signature words are let through separately.
+    common = tongue(language).min_frequency
+    counts = {w: n for w, n in counts.items() if (corpus.get(w) or 0) >= common}
+
+    def weight(item):
+        word, n = item
+        if n < DISTINCT_MIN_COUNT:
+            return (1, -n, word)
+        share = n / float(max(corpus[word], n))
+        return (0, -(share * (1 + math.log(n))), word)
+
+    return [w for w, _ in sorted(counts.items(), key=weight)]
 
 
 _THEME_WORDS = {}
@@ -226,13 +280,15 @@ def _theme_words(theme, language='en'):
     board they produced actually came from the fallback corpus and had nothing
     to do with the theme. They read their verses now, like everything else.
     """
-    key = (theme.pk, theme.slug, language)
+    # The source is part of the key: a theme an admin has just corrected must
+    # not keep serving the empty vocabulary its mistake left cached.
+    key = (theme.pk, theme.slug, language, json.dumps(theme.source or {}, sort_keys=True))
     if key in _THEME_WORDS:
         return _THEME_WORDS[key]
 
-    words = _count_words(_scope(theme, language=language))
+    words = _count_words(_scope(theme, language=language), language)
     if _thin(words):
-        wider = _count_words(_scope(theme, widen=True, language=language))
+        wider = _count_words(_scope(theme, widen=True, language=language), language)
         if len(wider) > len(words):
             words = wider
 
@@ -480,8 +536,9 @@ def _cells(word, row, col, direction):
     return [(row + i, col) for i in range(len(word))]
 
 
-def _can_place(board, word, row, col, direction):
-    """True when the word fits without contradicting or crowding its neighbours.
+def _crossings(board, word, row, col, direction):
+    """How many letters the word shares with the board where it would sit —
+    0 when it cannot go there at all.
 
     Crossword rules, not word-search rules: a word may cross another on a shared
     letter, but must not run alongside one, and must not butt up against a word
@@ -491,7 +548,7 @@ def _can_place(board, word, row, col, direction):
     before = (row - dr, col - dc)
     after = (row + dr * len(word), col + dc * len(word))
     if before in board or after in board:
-        return False
+        return 0
 
     crossings = 0
     for i, letter in enumerate(word):
@@ -499,19 +556,43 @@ def _can_place(board, word, row, col, direction):
         existing = board.get((r, c))
         if existing is not None:
             if existing != letter:
-                return False
+                return 0
             crossings += 1
             continue
         # An empty cell must not have neighbours to either side, or the word
         # would run parallel to another and create nonsense across the pair.
         side = [(r - dc, c - dr), (r + dc, c + dr)]
         if any(n in board for n in side):
-            return False
-    return crossings > 0
+            return 0
+    # Every letter already there means the word is lying on top of another.
+    return crossings if crossings < len(word) else 0
 
 
-def build_layout(words, rng):
-    """Place words in an interlocking crossword. Returns (placements, board)."""
+def _can_place(board, word, row, col, direction):
+    """True when the word fits without contradicting or crowding its neighbours."""
+    return _crossings(board, word, row, col, direction) > 0
+
+
+# The board has to fit a phone held upright. Twelve tiles across is about
+# 26pt a tile on the narrowest screen in use; past that the letters stop
+# reading, and the old layout could sprawl to twenty.
+MAX_SPAN = 12
+
+
+def _bounds(board):
+    rows = [r for r, _ in board]
+    cols = [c for _, c in board]
+    return min(rows), max(rows), min(cols), max(cols)
+
+
+def build_layout(words, rng, max_span=MAX_SPAN):
+    """Place words in an interlocking crossword. Returns (placements, board).
+
+    Each word goes where it leaves the board smallest and squarest, crossing
+    as many words as it can — a tight, well-knit board instead of a long
+    ladder. A word with nowhere to go yet is tried again once the rest are
+    down, since later words open new crossings for it.
+    """
     if not words:
         return [], {}
 
@@ -523,29 +604,41 @@ def build_layout(words, rng):
         board[(0, i)] = letter
     placements.append({'word': first, 'row': 0, 'col': 0, 'dir': ACROSS})
 
-    for word in words[1:]:
+    def place(word):
+        lo_r, hi_r, lo_c, hi_c = _bounds(board)
         options = []
         for i, letter in enumerate(word):
-            for (r, c), placed_letter in board.items():
+            for (r, c), placed_letter in list(board.items()):
                 if placed_letter != letter:
                     continue
                 # Cross the existing word at right angles to it.
                 for direction in (ACROSS, DOWN):
                     row = r if direction == ACROSS else r - i
                     col = c - i if direction == ACROSS else c
-                    if _can_place(board, word, row, col, direction):
-                        options.append((row, col, direction))
+                    crossings = _crossings(board, word, row, col, direction)
+                    if not crossings:
+                        continue
+                    end_r = row + (len(word) - 1 if direction == DOWN else 0)
+                    end_c = col + (len(word) - 1 if direction == ACROSS else 0)
+                    height = max(hi_r, end_r) - min(lo_r, row) + 1
+                    width = max(hi_c, end_c) - min(lo_c, col) + 1
+                    if height > max_span or width > max_span:
+                        continue
+                    options.append(((height * width, -crossings, abs(height - width)),
+                                    (row, col, direction)))
         if not options:
-            continue
-        # Prefer placements that keep the board compact.
+            return False
+        # Ties broken by the level's own seed, so a board stays reproducible.
         rng.shuffle(options)
-        row, col, direction = min(
-            options,
-            key=lambda o: abs(o[0]) + abs(o[1]) + len(word) // 2,
-        )
-        for r, c in _cells(word, row, col, direction):
-            board[(r, c)] = word[_cells(word, row, col, direction).index((r, c))]
+        row, col, direction = min(options, key=lambda o: o[0])[1]
+        for n, cell in enumerate(_cells(word, row, col, direction)):
+            board[cell] = word[n]
         placements.append({'word': word, 'row': row, 'col': col, 'dir': direction})
+        return True
+
+    skipped = [w for w in words[1:] if not place(w)]
+    for word in skipped:
+        place(word)
 
     return placements, board
 
@@ -612,7 +705,13 @@ def generate(theme, level, force=False, language='en'):
     # English keeps the seed it always had, so no English board changes.
     seed = theme.slug if language == 'en' else f'{theme.slug}:{language}'
     rng = random.Random(_seed_for(seed, level))
-    return _build(theme, level, rng, existing=existing, language=language)
+    try:
+        return _build(theme, level, rng, existing=existing, language=language)
+    except IntegrityError:
+        # Two players reached a new level at the same moment and the other
+        # built it first. Same seed, same board: take theirs.
+        return backfill(WordPuzzle.objects.get(
+            theme=theme, level=level, day__isnull=True, language=language))
 
 
 # The Daily Puzzle's difficulty: past the first easy boards, well short of hard.
@@ -656,25 +755,70 @@ def _build(theme, level, rng, existing=None, day=None, language='en'):
     if not candidates:
         raise ValueError('Theme "%s" has no usable words.' % theme.name)
 
-    # Start somewhere different every level. The old rule walked two places
-    # further down the list per level and then clamped at the end, so once a
-    # thin theme ran out every later level rebuilt the same board. A seeded
-    # start cannot run out, and stays deterministic for a given level.
-    start = rng.randrange(len(candidates))
-    ordered = candidates[start:] + candidates[:start]
+    signature = signature_words(theme, language)
+    # Wheels this theme has already used, in any order of their letters: a
+    # board must never come round again as a reshuffle of an old one.
+    used = {''.join(sorted(x)) for x in WordPuzzle.objects
+            .filter(theme=theme, language=language)
+            .exclude(pk=getattr(existing, 'pk', None))
+            .values_list('letters', flat=True)}
 
-    for base in ordered[:40]:
+    def fresh(word):
+        return ''.join(sorted(word)) not in used
+
+    # Walk the pool, most characteristic first, one step per level of this
+    # wheel size — the theme's best words come early, and the walk never
+    # clamps at the end (which is what once froze thin themes on one board).
+    band_start = 5 * (target_len - BASE_MIN) + 1
+    start = max(0, level - band_start) % len(candidates)
+    ordered = candidates[start:] + candidates[:start]
+    pool = [b for b in ordered[:160] if fresh(b)] or ordered[:40]
+
+    # Wheels that spell one of the theme's own words go first — LUKEWARM
+    # for the Gospels, because it spells LUKE.
+    def spells_signature(base):
+        have = Counter(base)
+        return any(len(s) < len(base) and not (Counter(s) - have) for s in signature)
+    if signature:
+        pool = [b for b in pool if spells_signature(b)] + [b for b in pool if not spells_signature(b)]
+
+    # Every other level (and the daily board) is built from a signature word
+    # itself — ANDREW, MATTHEW, GENESIS — shortest first, so they climb with
+    # the levels, never more than two letters past this level's wheel, and
+    # only names that spell a boardful (JESUS makes two other words).
+    tries = pool[:40]
+    if level % 2 == 1 or day:
+        def boardful(w):
+            have = Counter(w)
+            spelled = set(words_from(w, language=language))
+            spelled |= {s for s in signature if len(s) < len(w) and not (Counter(s) - have)}
+            return len(spelled | {w}) >= 5
+        featured = sorted((w for w in signature
+                           if BASE_MIN <= len(w) <= min(BASE_MAX, target_len + 2)
+                           and fresh(w) and boardful(w)),
+                          key=len)
+        # Not every name spells a boardful (JESUS makes few other words), so
+        # a few are offered before falling back to the theme's vocabulary.
+        tries = featured[:4] + [b for b in tries if b not in featured[:4]]
+    # Last of all, wheels already used: a repeat is better than no level.
+    tries += [b for b in ordered[:40] if b not in tries]
+
+    for base in tries:
         answers = words_from(base, floor, language)
         if len(answers) < 5:
             # These letters cannot make five words that common. Take the wheel
             # anyway at the standard floor: an easy level built from slightly
             # rarer words beats a level that refuses to exist.
             answers = words_from(base, language=language)
-        if len(answers) < 5:
+        have = Counter(base)
+        # The theme's own words this wheel can spell go on the board, whether
+        # or not the index counts them common: GENESIS is not in the KJV's text.
+        own = [s for s in signature if s != base and len(s) <= len(base) and not (Counter(s) - have)]
+        if len(set(answers) | set(own) | {base}) < 5:
             continue
-        chosen = answers[:wanted]
-        if base not in chosen:
-            chosen = [base] + chosen[:wanted - 1]
+        must = [base] + own
+        chosen = must + [a for a in answers if a not in must]
+        chosen = chosen[:max(wanted, min(len(must), wanted + 2))]
         placements, board = build_layout(chosen, rng)
         if len(placements) < 4:
             continue
@@ -686,6 +830,7 @@ def _build(theme, level, rng, existing=None, day=None, language='en'):
         # so this is the same set of words, minus the ones on the board.
         on_board = {p['word'] for p in placements}
         bonus = [w for w in words_from(letters, language=language) if w not in on_board]
+        bonus += [w for w in own if w not in on_board and w not in bonus]
         verse = _verse_for(theme, [p['word'] for p in placements], rng, language)
         # The reveal is a verse of the Bible being played.
         verses = {'verse': verse} if language == 'en' else {'sw_verse': verse}

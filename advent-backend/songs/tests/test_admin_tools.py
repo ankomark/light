@@ -79,6 +79,34 @@ class PuzzleThemeTests(APITestCase):
             res = self.client.post('/api/admin/puzzle-themes/', {'name': f'T{source}', 'source': source}, format='json')
             self.assertEqual(res.status_code, 400, source)
 
+    def test_theme_words_stay_editable_once_levels_exist(self):
+        from songs.models import WordPuzzle
+        theme = PuzzleTheme.objects.create(name='Test Law', slug='test-law',
+                                           source={'kind': 'books', 'first': 1, 'last': 5})
+        WordPuzzle.objects.create(theme=theme, level=1, size=0, grid=[], placements=[])
+        res = self.client.patch(f'/api/admin/puzzle-themes/{theme.id}/', {'source': {
+            **theme.source, 'words': 'Moses, sinai  x', 'words_sw': ['Musa'], 'term_sw': 'sheria'}}, format='json')
+        self.assertEqual(res.status_code, 200, res.data)
+        theme.refresh_from_db()
+        self.assertEqual(theme.source['words'], ['MOSES', 'SINAI'])
+        self.assertEqual(theme.source['words_sw'], ['MUSA'])
+        # Where the words come from is still fixed.
+        res = self.client.patch(f'/api/admin/puzzle-themes/{theme.id}/', {'source': {
+            **theme.source, 'last': 6}}, format='json')
+        self.assertEqual(res.status_code, 400)
+
+    def test_a_passage_must_name_a_real_book_and_chapter(self):
+        bad = self.client.post('/api/admin/puzzle-themes/', {'name': 'Bad', 'source': {
+            'kind': 'passage', 'book': 'Psalmz', 'chapter': 1}}, format='json')
+        self.assertEqual(bad.status_code, 400)
+        long = self.client.post('/api/admin/puzzle-themes/', {'name': 'Long', 'source': {
+            'kind': 'passage', 'book': 'Ruth', 'chapter': 9}}, format='json')
+        self.assertEqual(long.status_code, 400)
+        ok = self.client.post('/api/admin/puzzle-themes/', {'name': 'Ok', 'source': {
+            'kind': 'passage', 'book': 'psalms', 'chapter': 23}}, format='json')
+        self.assertEqual(ok.status_code, 201, ok.data)
+        self.assertEqual(ok.data['source']['book'], 'Psalms')
+
     def test_no_deleting_a_theme(self):
         theme = PuzzleTheme.objects.create(name='Test Law', slug='test-law', source={'kind': 'books', 'first': 1, 'last': 5})
         self.assertEqual(self.client.delete(f'/api/admin/puzzle-themes/{theme.id}/').status_code, 405)

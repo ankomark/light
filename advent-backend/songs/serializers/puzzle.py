@@ -217,8 +217,10 @@ class WordPuzzleSerializer(serializers.ModelSerializer):
         the longest answer on the board.
         """
         p = self._progress(obj)
-        if not (p and p.is_complete) or not obj.verse:
+        if not (p and p.is_complete):
             return None
+        # verse_payload picks the Bible: a Swahili board's verse is sw_verse,
+        # and `obj.verse` is empty there.
         return verse_payload(obj)
 
     def get_hints_used(self, obj):

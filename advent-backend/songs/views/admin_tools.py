@@ -9,6 +9,8 @@
 Every change is in the tamper-evident audit log, through the same gate as
 every admin power (standing, capability, two-step admin session).
 """
+import re
+
 from django.db.models import Count, Q
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -160,35 +162,92 @@ class AdminQuizBankViewSet(viewsets.ModelViewSet):
 # ── The word puzzle's themes ────────────────────────────────────────────────
 class PuzzleThemeAdminSerializer(serializers.ModelSerializer):
     puzzle_count = serializers.IntegerField(read_only=True, required=False)
+    # What the boards will be built around, the automatic words included
+    # (book names, the curated list) — so an admin sees what a theme is about
+    # before adding to it.
+    theme_words = serializers.SerializerMethodField()
 
     class Meta:
         model = PuzzleTheme
         fields = ['id', 'name', 'slug', 'description', 'name_sw', 'description_sw', 'icon', 'source',
-                  'order', 'is_active', 'puzzle_count']
+                  'order', 'is_active', 'puzzle_count', 'theme_words']
         read_only_fields = ['slug']
 
+    def get_theme_words(self, obj):
+        from ..puzzle import PUZZLE_LANGUAGES, language_available
+        from ..puzzle_signatures import signature_words
+        return {lang: signature_words(obj, lang) for lang in PUZZLE_LANGUAGES
+                if lang == 'en' or language_available(lang)}
+
+    @classmethod
+    def _fixed(cls, source):
+        return {k: v for k, v in (source or {}).items() if k not in cls.FREE_KEYS}
+
     def validate_source(self, value):
-        kind = (value or {}).get('kind')
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('source: an object.')
+        kind = value.get('kind')
+        if self.instance and self._fixed(value) == self._fixed(self.instance.source):
+            # Where the words come from is unchanged (an older theme may
+            # predate today's checks): only the free keys are looked at.
+            return self._clean_words(value)
         if kind == PuzzleTheme.BOOKS:
             first, last = value.get('first'), value.get('last')
             if not (isinstance(first, int) and isinstance(last, int) and 1 <= first <= last <= 66):
                 raise serializers.ValidationError('Books: first and last, 1 to 66, first not after last.')
         elif kind == PuzzleTheme.PASSAGE:
+            from ..bible_books import BOOKS_BY_NAME
             if not (value.get('book') and isinstance(value.get('chapter'), int) and value['chapter'] >= 1):
                 raise serializers.ValidationError('Passage: a book and a chapter.')
+            book = BOOKS_BY_NAME.get(value['book']) or next(
+                (b for b in BOOKS_BY_NAME.values() if b['name'].lower() == str(value['book']).strip().lower()), None)
+            if not book:
+                raise serializers.ValidationError('Passage: "%s" is not a book of the Bible.' % value['book'])
+            if value['chapter'] > book['chapters']:
+                raise serializers.ValidationError('Passage: %s has %d chapters.' % (book['name'], book['chapters']))
+            value['book'] = book['name']
         elif kind == PuzzleTheme.TOPIC:
             if not str(value.get('term') or '').strip():
                 raise serializers.ValidationError('Topic: the word to search scripture for.')
         else:
             raise serializers.ValidationError('kind: books, passage or topic.')
+        return self._clean_words(value)
+
+    def _clean_words(self, value):
+        # The theme's own words (puzzle_signatures.py): a list, or one line
+        # with commas — kept as a clean list of letters-only words.
+        for key in self.WORD_KEYS:
+            words = value.get(key)
+            if words in (None, '', []):
+                value.pop(key, None)
+                continue
+            if isinstance(words, str):
+                words = re.split(r'[,\s]+', words)
+            if not isinstance(words, list):
+                raise serializers.ValidationError(f'{key}: a list of words.')
+            clean = []
+            for w in words:
+                w = re.sub(r'[^A-Za-z]', '', str(w)).upper()
+                if len(w) >= 3 and w not in clean:
+                    clean.append(w)
+            if len(clean) > 60:
+                raise serializers.ValidationError(f'{key}: at most 60 words.')
+            value[key] = clean
         return value
+
+    # Keys that only steer levels not built yet, so they stay editable on a
+    # theme that already has levels: its words, and the Swahili search term.
+    WORD_KEYS = ('words', 'words_sw')
+    FREE_KEYS = WORD_KEYS + ('term_sw',)
 
     def validate(self, data):
         # Levels already built come from the theme's source: changing where
-        # the words come from would change what those levels mean.
-        if self.instance and 'source' in data and data['source'] != self.instance.source \
-                and self.instance.puzzles.exists():
-            raise serializers.ValidationError({'source': 'This theme has levels already; make a new theme instead.'})
+        # the words come from would change what those levels mean. The theme
+        # words and the Swahili term are let through — they only shape levels
+        # still to come.
+        if self.instance and 'source' in data and self.instance.puzzles.exists():
+            if self._fixed(data['source']) != self._fixed(self.instance.source):
+                raise serializers.ValidationError({'source': 'This theme has levels already; make a new theme instead.'})
         return data
 
     def create(self, validated):
