@@ -138,9 +138,32 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         fields = [
             'likes', 'comments', 'follows', 'messages', 'groups', 'communities',
             'live', 'quiz', 'weather', 'verse', 'books', 'notices', 'marketplace',
-            'quiet_from', 'quiet_to', 'utc_offset', 'updated_at',
+            'quiet_from', 'quiet_to', 'utc_offset', 'app_prefs', 'language', 'updated_at',
         ]
         read_only_fields = ['updated_at']
+
+    # Languages a push can be written in (songs/push_text.py).
+    LANGUAGES = ('', 'en', 'sw')
+
+    def validate_app_prefs(self, value):
+        # Only the known choices, with values they may take (songs/app_prefs.py).
+        # Unknown keys are dropped, not refused: a newer app may know a choice
+        # this server does not yet, and the rest must still be kept.
+        from ..app_prefs import clean
+        kept, _refused = clean(value)
+        return kept
+
+    def validate_language(self, value):
+        if value not in self.LANGUAGES:
+            raise serializers.ValidationError('en or sw.')
+        return value
+
+    def update(self, instance, validated):
+        # A change to one choice is sent alone: merged into what is kept, so
+        # two phones changing different things do not undo each other.
+        if 'app_prefs' in validated:
+            validated['app_prefs'] = {**(instance.app_prefs or {}), **validated['app_prefs']}
+        return super().update(instance, validated)
 
     def validate(self, data):
         for field in ('quiet_from', 'quiet_to'):

@@ -160,3 +160,31 @@ class FullerExportTests(APITestCase):
         self.assertEqual(data['groups'][0]['name'], 'Choir')
         self.assertEqual(data['group_posts'][0]['content'], 'practice at six')
         self.assertEqual(data['books_written'][0]['title'], 'My Book')
+
+
+class AppPrefsSyncTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user('two_phones', 'tp@x.com', 'oldpass123')
+        self.client.force_authenticate(self.user)
+
+    def _patch(self, body):
+        return self.client.patch('/api/notification-preferences/', body, format='json')
+
+    def test_choices_are_kept_and_merged(self):
+        self._patch({'app_prefs': {'wallpaperOn': False, 'bibleTextSize': 22}})
+        self._patch({'app_prefs': {'videoQuality': 'hd'}})
+        prefs = self.client.get('/api/notification-preferences/').data['app_prefs']
+        self.assertEqual(prefs, {'wallpaperOn': False, 'bibleTextSize': 22, 'videoQuality': 'hd'})
+
+    def test_only_known_choices_with_sane_values(self):
+        r = self._patch({'app_prefs': {
+            'wallpaperOn': 'yes', 'bibleTextSize': 900, 'audioQuality': 'lossless',
+            'pushEnabled': False, 'anything': {'x': 1}, 'dataSaver': True,
+        }})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['app_prefs'], {'dataSaver': True})
+
+    def test_the_language_pushes_are_written_in(self):
+        self.assertEqual(self._patch({'language': 'sw'}).data['language'], 'sw')
+        self.assertEqual(self._patch({'language': 'fr'}).status_code, 400)

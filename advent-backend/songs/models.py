@@ -1214,6 +1214,12 @@ class NotificationPreference(models.Model):
     quiet_from = models.PositiveSmallIntegerField(null=True, blank=True)
     quiet_to = models.PositiveSmallIntegerField(null=True, blank=True)
     utc_offset = models.SmallIntegerField(default=180)
+    # The app's own choices (wallpaper, playback quality, reading sizes…),
+    # kept with the account so a new phone or a reinstall opens as they left
+    # it. Only the keys in songs/app_prefs.py SYNCED are accepted.
+    app_prefs = models.JSONField(default=dict, blank=True)
+    # The language the app is in ('en', 'sw'): pushes are written in it.
+    language = models.CharField(max_length=8, blank=True, default='')
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
