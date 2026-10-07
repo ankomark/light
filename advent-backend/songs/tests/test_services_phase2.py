@@ -39,7 +39,8 @@ class ServicePageTests(APITestCase):
 
     def test_what_isnt_accepted(self):
         self.assertEqual(self.create(gallery=['https://elsewhere.example/x.jpg']).status_code, 400)
-        self.assertEqual(self.create(gallery=[f'{R2}/c/{i}.jpg' for i in range(13)]).status_code, 400)
+        self.assertEqual(self.create(gallery=[f'{R2}/c/{i}.jpg' for i in range(21)]).status_code, 400)
+        self.assertEqual(self.create(gallery=[f'{R2}/c/{i}.jpg' for i in range(20)]).status_code, 201)   # up to 20
         self.assertEqual(self.create(opening_hours={'funday': ['08:00', '17:00']}).status_code, 400)
         self.assertEqual(self.create(opening_hours={'mon': ['17:00', '08:00']}).status_code, 400)
         self.assertEqual(self.create(opening_hours={'mon': ['8am', '5pm']}).status_code, 400)

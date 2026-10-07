@@ -5,6 +5,7 @@
 from datetime import timedelta
 
 from django.core.cache import cache
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -111,3 +112,24 @@ class ServicesRescanTests(APITestCase):
         r = self.client.get(f'/service/{s.id}/')
         self.assertEqual(r.status_code, 200)
         self.assertNotIn(b'<script>alert(1)</script>', r.content)
+
+
+@override_settings(R2_PUBLIC_BASE='https://pub-test.r2.dev')
+class PortfolioTests(APITestCase):
+    """The service page's portfolio: up to 20 pictures, each with a line about it."""
+
+    def setUp(self):
+        cache.clear()
+        self.owner = aged(User.objects.create_user('pfowner', 'pf@x.com', 'pw'))
+        self.client.force_authenticate(self.owner)
+
+    def test_captions_are_kept_and_older_apps_still_get_addresses(self):
+        r2 = 'https://pub-test.r2.dev'
+        pics = [{'url': f'{r2}/c/{i}.jpg', 'caption': f'  Wedding   {i}  '} for i in range(3)] + [f'{r2}/c/plain.jpg']
+        r = self.client.post('/api/video-studios/', {'name': 'Studio', 'location': 'Kisumu', 'gallery': pics},
+                             format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        page = self.client.get(f"/api/video-studios/{r.data['id']}/").data
+        self.assertEqual(page['gallery'][3], f'{r2}/c/plain.jpg')                       # addresses, as before
+        self.assertEqual(page['gallery_items'][0], {'url': f'{r2}/c/0.jpg', 'caption': 'Wedding 0'})
+        self.assertEqual(page['gallery_items'][3]['caption'], '')

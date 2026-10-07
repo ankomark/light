@@ -326,7 +326,8 @@ describe('Phase 2', () => {
     let answer;
     mockApi.fetchVideoStudioById.mockImplementation(() => new Promise((res) => { answer = res; }));
     const r = render(<ServiceDetail route={{ params: { id: 5, preview: svc(5, { name: 'Hope Clinic' }) } }} navigation={nav()} />);
-    expect(r.getByText('Hope Clinic')).toBeTruthy();                       // the first frame
+    // The name heads the masthead (and the slim bar and the footer repeat it).
+    expect(r.getAllByText('Hope Clinic').length).toBeGreaterThan(0);        // the first frame
     expect(r.queryByTestId('service-gallery')).toBeNull();
     await waitFor(() => expect(mockApi.fetchVideoStudioById).toHaveBeenCalledWith(5));
     await act(async () => { answer(svc(5, { name: 'Hope Clinic', gallery: ['https://r2.test/a.jpg'], opening_hours: hours })); });
@@ -376,7 +377,7 @@ describe('Phase 2', () => {
     await waitFor(() => expect(r.getByTestId('service-retry')).toBeTruthy());
     mockApi.fetchVideoStudioById.mockResolvedValue(svc(5, { name: 'Back again' }));
     await act(async () => { fireEvent.press(r.getByTestId('service-retry')); });
-    expect(r.getByText('Back again')).toBeTruthy();
+    expect(r.getAllByText('Back again').length).toBeGreaterThan(0);
     expect(mockApi.fetchVideoStudioById).toHaveBeenLastCalledWith(5);      // the link's id, as a number
   });
 
@@ -426,7 +427,10 @@ describe('Phase 3', () => {
     const n = nav();
     const r = await open(page({ rating_avg: 4.5, rating_count: 12, member_since: 2024,
       organization: { slug: 'kmh', name: 'Kisumu Mission Hospital', is_verified: true } }), n);
-    expect(r.getByText('4.5 · reviews.count:12')).toBeTruthy();
+    // The highlights band: the stars large, how many below.
+    expect(r.getByTestId('service-stars')).toBeTruthy();
+    expect(r.getByText('4.5')).toBeTruthy();
+    expect(r.getAllByText('reviews.count:12').length).toBeGreaterThan(0);
     expect(r.getByText('services.runBy:Kisumu Mission Hospital')).toBeTruthy();
     expect(r.getByText('services.listedBy:dr · services.memberSince:2024')).toBeTruthy();
     fireEvent.press(r.getByTestId('service-org'));
@@ -750,5 +754,56 @@ describe('Scan fixes', () => {
     const days = [{ day: '2026-09-20', readers: 3 }, { day: '2026-09-21', readers: 5 }];
     const r = render(<DailyColumns data={days} title="Views" t={tt} onLabel="page views on" totalKey="insights.totalViews" />);
     expect(r.getByTestId('chart-daily-plot').props.accessibilityLabel).toBe('Views: insights.totalViews:8');
+  });
+});
+describe('Maison: the provider’s own site', () => {
+  const ServiceDetail = require('../ServiceDetail').default;
+  const { mosaicRows, portfolioOf } = require('../ServiceDetail');
+  const pics = (n) => Array.from({ length: n }, (_, i) => ({ url: `https://r2.test/p${i}.jpg`, caption: i === 0 ? 'Bridal makeup' : '' }));
+
+  test('the portfolio: a feature, then pairs; captions ride along; older listings have addresses only', () => {
+    const rows = mosaicRows(pics(6));
+    expect(rows.map((r) => [r.kind, r.items.map((p) => p.index)])).toEqual([
+      ['feature', [0]], ['tallLeft', [1, 2]], ['tallRight', [3, 4]], ['tallLeft', [5]],
+    ]);
+    expect(portfolioOf({ gallery: ['https://r2.test/a.jpg'] })).toEqual([{ url: 'https://r2.test/a.jpg', caption: '' }]);
+    expect(portfolioOf({ gallery_items: pics(1), gallery: ['ignored'] })[0].caption).toBe('Bridal makeup');
+  });
+
+  test('a tap opens the photo full screen, with its count and caption', async () => {
+    const s = svc(5, { name: 'Hope Studio', gallery_items: pics(20), gallery: pics(20).map((p) => p.url) });
+    mockApi.fetchVideoStudioById.mockResolvedValue(s);
+    const r = render(<ServiceDetail route={{ params: { id: 5, preview: s } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('service-photo-19')).toBeTruthy());     // all twenty
+    await act(async () => { fireEvent.press(r.getByTestId('service-photo-0')); });
+    expect(r.getByTestId('service-photo-count').props.children).toBe('services.site.photoOf:1,20');   // 1 of 20
+    expect(r.getAllByText('Bridal makeup').length).toBeGreaterThan(0);
+  });
+
+  test('the site’s navigation lists only the sections the page has', async () => {
+    const s = svc(6, { name: 'Plain', description: 'We fix pipes.', service_types: [] });
+    mockApi.fetchVideoStudioById.mockResolvedValue(s);
+    const r = render(<ServiceDetail route={{ params: { id: 6, preview: s } }} navigation={nav()} />);
+    await waitFor(() => expect(r.getByTestId('service-nav')).toBeTruthy());
+    expect(r.getByTestId('service-nav-about')).toBeTruthy();
+    expect(r.queryByTestId('service-nav-work')).toBeNull();          // no photos, no Work
+    expect(r.getByTestId('service-nav-contact')).toBeTruthy();
+  });
+
+  test('the form saves a caption with its photo, and a plain photo as an address', async () => {
+    const existing = svc(7, {
+      name: 'Hope Studio', is_owner: true, location: 'Kisumu',
+      gallery_items: [{ url: 'https://r2.test/a.jpg', caption: '' }, { url: 'https://r2.test/b.jpg', caption: '' }],
+    });
+    mockApi.updateVideoStudio.mockResolvedValue(existing);
+    const r = render(<ServiceForm route={{ params: { service: existing } }} navigation={nav()} />);
+    fireEvent.press(r.getByTestId('service-gallery-photo-1'));
+    fireEvent.changeText(r.getByTestId('service-gallery-caption'), 'Garden wedding');
+    fireEvent.press(r.getByTestId('service-gallery-first'));
+    fireEvent.press(r.getByTestId('service-gallery-done'));
+    await act(async () => { fireEvent.press(r.getByTestId('service-save')); });
+    expect(mockApi.updateVideoStudio).toHaveBeenCalledWith(7, expect.objectContaining({
+      gallery: [{ url: 'https://r2.test/b.jpg', caption: 'Garden wedding' }, 'https://r2.test/a.jpg'],
+    }));
   });
 });

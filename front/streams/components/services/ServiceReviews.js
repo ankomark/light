@@ -19,41 +19,45 @@ import { colors, typography, spacing, radius } from '../../constants/theme';
 
 const when = (iso) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } };
 
-const Review = ({ r, t, ownerName, onReply, onReport }) => (
-  <View style={styles.review} testID={`service-review-${r.id}`}>
+const Review = ({ r, t, ownerName, onReply, onReport, k = {} }) => (
+  <View style={[styles.review, k.review]} testID={`service-review-${r.id}`}>
     <View style={styles.reviewHead}>
-      <Text style={styles.who} numberOfLines={1}>{r.user?.username}</Text>
+      <Text style={[styles.who, k.who]} numberOfLines={1}>{r.user?.username}</Text>
       <StarRow value={r.rating} size={12} />
       {/* A customer: booked here through the app, and taken on. */}
       {r.booked ? (
         <View style={styles.booked} testID={`service-review-booked-${r.id}`}>
           <Ionicons name="checkmark-circle" size={11} color={colors.success} />
-          <Text style={styles.bookedText}>{t('services.bookedHere')}</Text>
+          <Text style={[styles.bookedText, k.bookedText]}>{t('services.bookedHere')}</Text>
         </View>
       ) : null}
-      <Text style={styles.when}>{when(r.updated_at)}</Text>
+      <Text style={[styles.when, k.when]}>{when(r.updated_at)}</Text>
       {onReport ? (
         <TouchableOpacity onPress={() => onReport(r)} hitSlop={8} accessibilityLabel={t('common.report')} testID={`service-review-report-${r.id}`}>
           <Ionicons name="flag-outline" size={14} color={colors.textMuted} />
         </TouchableOpacity>
       ) : null}
     </View>
-    {r.body ? <Text style={styles.body}>{r.body}</Text> : null}
+    {r.body ? <Text style={[styles.body, k.body]}>{r.body}</Text> : null}
     {r.reply ? (
-      <View style={styles.reply}>
-        <Text style={styles.replyWho}>{t('services.replyFrom', { name: ownerName })}</Text>
-        <Text style={styles.replyText}>{r.reply}</Text>
+      <View style={[styles.reply, k.reply]}>
+        <Text style={[styles.replyWho, k.replyWho]}>{t('services.replyFrom', { name: ownerName })}</Text>
+        <Text style={[styles.replyText, k.replyText]}>{r.reply}</Text>
       </View>
     ) : null}
     {onReply ? (
       <TouchableOpacity onPress={() => onReply(r)} testID={`service-review-reply-${r.id}`}>
-        <Text style={styles.link}>{r.reply ? t('services.editReply') : t('services.replyAction')}</Text>
+        <Text style={[styles.link, k.link]}>{r.reply ? t('services.editReply') : t('services.replyAction')}</Text>
       </TouchableOpacity>
     ) : null}
   </View>
 );
 
-const ServiceReviews = ({ service, uid, t, isAuthenticated, navigation }) => {
+// `skin`: style overrides by key (section, title, avg, review, who, body,
+// write, fill …), so a page with its own look (the service's own page)
+// draws its reviews in it. Without one, the app's look.
+const ServiceReviews = ({ service, uid, t, isAuthenticated, navigation, skin }) => {
+  const k = skin || {};
   const kb = useKeyboardHeight();
   const { data, setData, reload } = useCachedData(userKey(uid, `service-reviews:${service.id}`),
     () => fetchServiceReviews(service.id));
@@ -112,43 +116,43 @@ const ServiceReviews = ({ service, uid, t, isAuthenticated, navigation }) => {
   const ready = sheet?.kind === 'review' ? draft.rating > 0 : draft.body.trim().length > 0;
   const ownerName = service.name;
   return (
-    <View style={styles.section} testID="service-reviews">
-      <Text style={styles.title}>{t('reviews.title')}</Text>
+    <View style={[styles.section, k.section]} testID="service-reviews">
+      <Text style={[styles.title, k.title]}>{t('reviews.title')}</Text>
       {summary.count ? (
         <View style={styles.summary}>
           <View style={styles.avgBox}>
-            <Text style={styles.avg}>{summary.average}</Text>
+            <Text style={[styles.avg, k.avg]}>{summary.average}</Text>
             <StarRow value={summary.average} />
-            <Text style={styles.count}>{t('reviews.count', { n: summary.count })}</Text>
+            <Text style={[styles.count, k.count]}>{t('reviews.count', { n: summary.count })}</Text>
           </View>
           <View style={styles.spread}>
             {[5, 4, 3, 2, 1].map((s) => (
               <View key={s} style={styles.spreadRow}>
-                <Text style={styles.spreadLabel}>{s}</Text>
-                <View style={styles.track}>
+                <Text style={[styles.spreadLabel, k.spreadLabel]}>{s}</Text>
+                <View style={[styles.track, k.track]}>
                   <View style={[styles.fill, { width: `${Math.round(((summary.spread[s] || 0) / summary.count) * 100)}%` }]} />
                 </View>
               </View>
             ))}
           </View>
         </View>
-      ) : <Text style={styles.none}>{t('services.noReviews')}</Text>}
+      ) : <Text style={[styles.none, k.none]}>{t('services.noReviews')}</Text>}
 
       {data.mine ? (
-        <TouchableOpacity style={styles.mine} onPress={openReview} testID="service-review-mine">
-          <Text style={styles.mineLabel}>{t('reviews.yours')}</Text>
-          <Review r={data.mine} t={t} ownerName={ownerName} />
-          <Text style={styles.link}>{t('reviews.edit')}</Text>
+        <TouchableOpacity style={[styles.mine, k.mine]} onPress={openReview} testID="service-review-mine">
+          <Text style={[styles.mineLabel, k.mineLabel]}>{t('reviews.yours')}</Text>
+          <Review r={data.mine} t={t} ownerName={ownerName} k={k} />
+          <Text style={[styles.link, k.link]}>{t('reviews.edit')}</Text>
         </TouchableOpacity>
       ) : !owner ? (
-        <TouchableOpacity style={styles.write} onPress={openReview} testID="service-review-write">
-          <Ionicons name="star-outline" size={17} color={colors.white} />
-          <Text style={styles.writeText}>{t('services.rateIt')}</Text>
+        <TouchableOpacity style={[styles.write, k.write]} onPress={openReview} testID="service-review-write">
+          <Ionicons name="star-outline" size={17} color={k.writeIcon || colors.white} />
+          <Text style={[styles.writeText, k.writeText]}>{t('services.rateIt')}</Text>
         </TouchableOpacity>
       ) : null}
 
       {(data.results || []).map((r) => (
-        <Review key={r.id} r={r} t={t} ownerName={ownerName} onReply={owner ? openReply : null}
+        <Review key={r.id} r={r} t={t} ownerName={ownerName} k={k} onReply={owner ? openReply : null}
           onReport={isAuthenticated && !owner ? setReporting : null} />
       ))}
 

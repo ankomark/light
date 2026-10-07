@@ -154,7 +154,20 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
 
 
 DAYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
-GALLERY_MAX = 12
+GALLERY_MAX = 20
+CAPTION_MAX = 80
+
+
+def gallery_items(stored):
+    """A listing's gallery as [{url, caption}] - each stored entry is an
+    address, or {url, caption} once its owner wrote a line for it."""
+    out = []
+    for x in stored or []:
+        url, caption = (x.get('url'), x.get('caption') or '') if isinstance(x, dict) else (x, '')
+        url = media.resolve(url) if url else None
+        if url:
+            out.append({'url': url, 'caption': caption})
+    return out
 _HHMM = re.compile(r'^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$')
 
 
@@ -215,11 +228,30 @@ class VideoStudioSerializer(serializers.ModelSerializer):
         return attrs
 
     def validate_gallery(self, value):
+        """Up to 20 of the owner's own pictures, each an address or
+        {url, caption} (a line about the work shown, up to 80 characters)."""
         if not isinstance(value, list):
             raise serializers.ValidationError('A list of pictures.')
         if len(value) > GALLERY_MAX:
             raise serializers.ValidationError(f'Up to {GALLERY_MAX} pictures.')
-        return [self._ours(str(u)) for u in value if u]
+        out = []
+        for item in value:
+            if isinstance(item, dict):
+                url = self._ours(str(item.get('url') or ''))
+                caption = ' '.join(str(item.get('caption') or '').split())[:CAPTION_MAX]
+                if url:
+                    out.append({'url': url, 'caption': caption} if caption else url)
+            elif item:
+                out.append(self._ours(str(item)))
+        return out
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # Addresses as before (older apps read these), and the captions beside.
+        items = gallery_items(obj.gallery)
+        data['gallery'] = [i['url'] for i in items]
+        data['gallery_items'] = items
+        return data
 
     def validate_opening_hours(self, value):
         """{day: [open, close]}: days mon to sun, times HH:MM, closing after
@@ -261,6 +293,8 @@ class VideoStudioListSerializer(serializers.ModelSerializer):
     logo = serializers.SerializerMethodField()
     cover_image = serializers.SerializerMethodField()
     gallery = serializers.SerializerMethodField()
+    # The gallery with each picture's caption (the page's portfolio).
+    gallery_items = serializers.SerializerMethodField()
 
     class Meta:
         model = Videostudio
@@ -268,7 +302,10 @@ class VideoStudioListSerializer(serializers.ModelSerializer):
         read_only_fields = ('created_by', 'is_verified', 'featured_at')
 
     def get_gallery(self, obj):
-        return [u for u in (media.resolve(x) for x in (obj.gallery or [])) if u]
+        return [i['url'] for i in gallery_items(obj.gallery)]
+
+    def get_gallery_items(self, obj):
+        return gallery_items(obj.gallery)
 
     def get_is_owner(self, obj):
         request = self.context.get('request')

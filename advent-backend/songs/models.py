@@ -1578,7 +1578,7 @@ class Videostudio(models.Model):
     twitter_link = models.URLField(blank=True, null=True)
     service_rates = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
     is_verified = models.BooleanField(default=False)
-    # Photos of their work (R2 URLs, up to 12) — the service page's gallery.
+    # Photos of their work (up to 20; an R2 URL, or {url, caption}) — the service page's portfolio.
     gallery = models.JSONField(default=list, blank=True)
     # When they're open, the week through: {"mon": ["08:00", "17:00"], …};
     # a day left out is closed. Empty = hours not given.

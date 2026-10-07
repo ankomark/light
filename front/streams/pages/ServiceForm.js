@@ -16,6 +16,8 @@ import { createVideoStudio, updateVideoStudio, fetchOrganizations } from '../ser
 import { peekCache, writeCache, userKey } from '../utils/screenCache';
 import { useAuth } from '../context/useAuth';
 import PlaceSheet from '../components/services/PlaceSheet';
+import BottomSheet from '../components/BottomSheet';
+import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import {
   CATEGORIES, SERVICE_TYPES_BY_CATEGORY, SOCIAL_LINKS, CURRENCIES, DAYS, serviceLabel, withScheme, noteServicesChanged,
 } from '../services/servicesCatalog';
@@ -23,7 +25,13 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 
-const GALLERY_MAX = 12;
+const GALLERY_MAX = 20;
+const CAPTION_MAX = 80;
+// A gallery entry as {url, caption}: the page's portfolio shows the caption
+// under the photo. A listing from before captions has addresses only.
+const galleryOf = (s) => (Array.isArray(s?.gallery_items) && s.gallery_items.length
+  ? s.gallery_items.map((g) => ({ url: g.url, caption: g.caption || '' }))
+  : (s?.gallery || []).map((url) => ({ url, caption: '' })));
 const HHMM = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
 const WEEKDAYS = ['tue', 'wed', 'thu', 'fri'];
 // 8:00 → 08:00, 830 → 08:30: forgiving about how a time is typed.
@@ -74,7 +82,9 @@ const ServiceForm = ({ route, navigation }) => {
     : { ...EMPTY, category: route.params?.category || 'media' }));
   const [logo, setLogo] = useState(existing?.logo || '');
   const [cover, setCover] = useState(existing?.cover_image || '');
-  const [gallery, setGallery] = useState(() => existing?.gallery || []);
+  const [gallery, setGallery] = useState(() => galleryOf(existing));
+  const [photoAt, setPhotoAt] = useState(null);        // the gallery photo being captioned
+  const kb = useKeyboardHeight();
   const [hours, setHours] = useState(() => existing?.opening_hours || {});
   // Listed under an organisation its owner belongs to (a church clinic,
   // a school), or their own name.
@@ -110,19 +120,31 @@ const ServiceForm = ({ route, navigation }) => {
   const pick = async (which) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') { notify(t('chat.permissionRequired'), t('dir.permissionPhotos')); return; }
+    const room = GALLERY_MAX - gallery.length;
+    const several = which === 'gallery' && room > 1;
     const r = await ImagePicker.launchImageLibraryAsync({
       // iOS ignores the crop's shape and crops square: a 16:9 cover then lost
       // its top and bottom. On iOS the cover goes in whole (shown as cover).
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: which !== 'cover' || Platform.OS !== 'ios',
+      // The portfolio: photos as they are, several at once (a crop can't be
+      // offered for many), up to what room is left.
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: !several && (which !== 'cover' || Platform.OS !== 'ios'),
+      ...(several ? { allowsMultipleSelection: true, selectionLimit: room } : {}),
       aspect: which === 'logo' ? [1, 1] : which === 'gallery' ? [1, 1] : [16, 9], quality: 0.8,
     });
     if (r.canceled || !r.assets?.length) return;
     setUploading(which);
     try {
-      const small = await compressImage(r.assets[0].uri, { width: which === 'logo' ? 400 : which === 'gallery' ? 1200 : 1000, quality: 0.65 });
-      const up = await uploadMedia({ uri: small.uri, name: `service_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'cover');
-      if (which === 'gallery') setGallery((g) => [...g, up.url].slice(0, GALLERY_MAX));
-      else (which === 'logo' ? setLogo : setCover)(up.url);
+      const assets = which === 'gallery' ? r.assets.slice(0, Math.max(1, room)) : r.assets.slice(0, 1);
+      for (const asset of assets) {
+        const small = await compressImage(asset.uri, {
+          width: which === 'logo' ? 400 : which === 'gallery' ? 1600 : 1000, quality: which === 'gallery' ? 0.75 : 0.65,
+          sourceWidth: asset.width,
+        });
+        const up = await uploadMedia({ uri: small.uri, name: `service_${Date.now()}.jpg`, mimeType: 'image/jpeg' }, 'cover');
+        if (which === 'gallery') setGallery((g) => [...g, { url: up.url, caption: '' }].slice(0, GALLERY_MAX));
+        else (which === 'logo' ? setLogo : setCover)(up.url);
+      }
     } catch (e) {
       notify(t('common.uploadFailedTitle'), e?.message || t('common.uploadImageFailed'));
     } finally {
@@ -162,7 +184,8 @@ const ServiceForm = ({ route, navigation }) => {
     payload.organization_slug = orgSlug;
     payload.latitude = pin ? Number(pin.lat.toFixed(6)) : null;
     payload.longitude = pin ? Number(pin.lng.toFixed(6)) : null;
-    payload.gallery = gallery.filter((u) => u.startsWith('http'));
+    payload.gallery = gallery.filter((g) => g.url?.startsWith('http'))
+      .map((g) => (g.caption?.trim() ? { url: g.url, caption: g.caption.trim().slice(0, CAPTION_MAX) } : g.url));
     // Links: filled in ones as real addresses ("instagram.com/x" → https://…).
     LINK_KEYS.forEach((k) => { const v = form[k].trim(); payload[k] = v ? withScheme(v) : ''; });
     // Pictures: only new uploads (addresses); an old base64 one stays as it is.
@@ -186,8 +209,50 @@ const ServiceForm = ({ route, navigation }) => {
     }
   };
 
+  const photo = photoAt != null ? gallery[photoAt] : null;
+  const setCaption = (v) => setGallery((g) => g.map((x, j) => (j === photoAt ? { ...x, caption: v.slice(0, CAPTION_MAX) } : x)));
+  const makeFirst = () => {
+    setGallery((g) => [g[photoAt], ...g.filter((_, j) => j !== photoAt)]);
+    setPhotoAt(0);
+  };
+  const removePhoto = () => {
+    setGallery((g) => g.filter((_, j) => j !== photoAt));
+    setPhotoAt(null);
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+      <BottomSheet visible={!!photo} onClose={() => setPhotoAt(null)} heightRatio={0.72} keyboardHeight={kb}
+        header={(
+          <View style={styles.photoHead}>
+            <Text style={styles.photoTitle}>{t('services.site.captionTitle')}</Text>
+            <TouchableOpacity onPress={() => setPhotoAt(null)} hitSlop={8} testID="service-gallery-done">
+              <Text style={styles.photoDone}>{t('common.done')}</Text>
+            </TouchableOpacity>
+          </View>
+        )}>
+        {photo ? (
+          <ScrollView contentContainerStyle={styles.photoBody} keyboardShouldPersistTaps="handled">
+            <Image source={{ uri: photo.url }} style={styles.photoPreview} contentFit="cover" />
+            <TextInput style={styles.input} value={photo.caption} onChangeText={setCaption} maxLength={CAPTION_MAX}
+              placeholder={t('services.site.captionPlaceholder')} placeholderTextColor={colors.placeholder}
+              testID="service-gallery-caption" />
+            <Text style={styles.photoCount}>{`${photo.caption.length} / ${CAPTION_MAX}`}</Text>
+            <View style={styles.photoActions}>
+              {photoAt > 0 ? (
+                <TouchableOpacity style={styles.photoBtn} onPress={makeFirst} testID="service-gallery-first">
+                  <Ionicons name="star-outline" size={16} color={colors.primary} />
+                  <Text style={styles.photoBtnText}>{t('services.site.makeFirst')}</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={styles.photoBtn} onPress={removePhoto} testID="service-gallery-remove">
+                <Ionicons name="trash-outline" size={16} color={colors.error} />
+                <Text style={[styles.photoBtnText, { color: colors.error }]}>{t('common.remove')}</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        ) : null}
+      </BottomSheet>
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={10}
           accessibilityRole="button" accessibilityLabel={t('common.close')} testID="service-form-close">
@@ -286,16 +351,20 @@ const ServiceForm = ({ route, navigation }) => {
           <Text style={styles.section}>{t('services.gallery')}</Text>
           <Text style={styles.optional}>{t('services.optional')}</Text>
         </View>
-        <Text style={styles.hint}>{t('services.galleryHint', { n: GALLERY_MAX })}</Text>
+        <Text style={styles.hint}>{t('services.site.galleryHint', { n: GALLERY_MAX })}</Text>
+        <Text style={styles.galleryCount}>{`${gallery.length} / ${GALLERY_MAX}`}</Text>
         <View style={styles.galleryGrid}>
-          {gallery.map((u, i) => (
-            <View key={`${i}_${u}`} style={styles.galleryItem}>
-              <Image source={{ uri: u }} style={StyleSheet.absoluteFill} contentFit="cover" />
-              <TouchableOpacity style={styles.galleryRemove} onPress={() => setGallery((g) => g.filter((_, j) => j !== i))}
+          {gallery.map((g, i) => (
+            <TouchableOpacity key={`${i}_${g.url}`} style={styles.galleryItem} onPress={() => setPhotoAt(i)}
+              activeOpacity={0.85} testID={`service-gallery-photo-${i}`} accessibilityLabel={t('services.site.captionTitle')}>
+              <Image source={{ uri: g.url }} style={StyleSheet.absoluteFill} contentFit="cover" />
+              {i === 0 ? <View style={styles.galleryFirst}><Ionicons name="star" size={10} color={colors.white} /></View> : null}
+              {g.caption ? <View style={styles.galleryCaptioned}><Ionicons name="text" size={11} color={colors.white} /></View> : null}
+              <TouchableOpacity style={styles.galleryRemove} onPress={() => setGallery((x) => x.filter((_, j) => j !== i))}
                 hitSlop={6} accessibilityLabel={t('common.remove')} testID={`service-gallery-remove-${i}`}>
                 <Ionicons name="close" size={14} color={colors.white} />
               </TouchableOpacity>
-            </View>
+            </TouchableOpacity>
           ))}
           {gallery.length < GALLERY_MAX ? (
             <TouchableOpacity style={[styles.galleryItem, styles.galleryAdd]} onPress={() => pick('gallery')} disabled={!!uploading}
@@ -456,6 +525,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
   },
   galleryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  galleryCount: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
+  galleryFirst: {
+    position: 'absolute', left: 4, top: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  galleryCaptioned: {
+    position: 'absolute', left: 4, bottom: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  photoHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  photoTitle: { ...typography.h3, color: colors.textPrimary },
+  photoDone: { ...typography.label, color: colors.primary, fontWeight: '800' },
+  photoBody: { paddingHorizontal: spacing.md, gap: spacing.sm, paddingBottom: spacing.lg },
+  photoPreview: { width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: colors.inputBg },
+  photoCount: { ...typography.caption, color: colors.textMuted, alignSelf: 'flex-end' },
+  photoActions: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
+  photoBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 9,
+    borderRadius: radius.full, borderWidth: 1, borderColor: colors.border,
+  },
+  photoBtnText: { ...typography.label, color: colors.primary, fontWeight: '700' },
   galleryItem: { width: 84, height: 84, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.inputBg },
   galleryAdd: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed' },
   galleryRemove: {
