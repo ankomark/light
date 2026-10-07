@@ -259,6 +259,32 @@ class AdminInsightsView(APIView):
         })
 
 
+# ── Monitor: how the server is doing ────────────────────────────────────────
+class AdminMonitorView(APIView):
+    """GET /admin/monitor/ — the last hour minute by minute (requests, server
+    errors, average time), the slowest and failing endpoints, and the checks:
+    database, cache, background jobs, notifications, storage (songs/monitor.py)."""
+
+    def get_permissions(self):
+        return [Cap('view_analytics', 'manage_app', 'manage_security')()]
+
+    def get(self, request):
+        from .. import monitor
+        series = monitor.minutes()
+        slow, failing = monitor.endpoints()
+        total = sum(m['requests'] for m in series)
+        errors = sum(m['errors'] for m in series)
+        return Response({
+            'minutes': series,
+            'hour': {'requests': total, 'errors': errors,
+                     'error_rate': round(100 * errors / total, 2) if total else 0,
+                     'avg_ms': round(sum(m['avg_ms'] * m['requests'] for m in series) / total) if total else 0},
+            'slowest': slow,
+            'failing': failing,
+            'health': monitor.health(),
+        })
+
+
 # ── Pulse: the dashboard's charts ───────────────────────────────────────────
 PULSE_TZ = ZoneInfo('Africa/Nairobi')
 PULSE_SECONDS = 60

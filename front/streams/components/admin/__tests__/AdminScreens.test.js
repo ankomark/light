@@ -37,6 +37,7 @@ const AdminContent = require('../AdminContent').default;
 const AdminLogs = require('../AdminLogs').default;
 const AdminMore = require('../AdminMore').default;
 const AdminSecurity = require('../AdminSecurity').default;
+const AdminMonitor = require('../AdminMonitor').default;
 
 const asAdmin = (ui, me = { is_super_admin: true, capabilities: [] }) => render(<AdminMe.Provider value={me}>{ui}</AdminMe.Provider>);
 
@@ -252,4 +253,22 @@ test('a recovery case: the account moved to the email they can reach, with a rea
   fireEvent.press(screen.getByTestId('sec-case-move-3'));
   await pickReason(screen, 'other');
   expect(mockApi.changeAccountEmail).toHaveBeenCalledWith(9, 'new@x.com', 'adminKit.reason.other');
+});
+
+test('the monitor shows the hour and the checks', async () => {
+  mockApi.fetchAdminMonitor.mockResolvedValue({
+    hour: { requests: 1200, errors: 30, error_rate: 2.5, avg_ms: 140 },
+    minutes: [{ at: '10:00', requests: 20, errors: 1, refused: 2, avg_ms: 100 }],
+    slowest: [{ endpoint: '/api/feed/', requests: 50, avg_ms: 1200, errors: 0 }], failing: [],
+    health: {
+      database: { ok: true, ms: 12, engine: 'postgresql' }, cache: { ok: true, ms: 1, shared: false },
+      jobs: { queued: 2, running: 0, failed_day: 1, oldest_waiting_minutes: 3, stuck: 0 },
+      push: { sent: 10, failed: 1 }, storage: { configured: true }, server: { debug: false, uptime_minutes: 90 },
+    },
+  });
+  const screen = asAdmin(<AdminMonitor />);
+  await waitFor(() => expect(screen.getByText('2.5%')).toBeTruthy());
+  expect(screen.getByText('/api/feed/')).toBeTruthy();
+  expect(screen.getByText('adminMon.cacheLocal')).toBeTruthy();
+  screen.unmount();
 });

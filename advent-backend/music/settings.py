@@ -181,6 +181,8 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     # Addresses an admin (or the attack rules) blocked: refused first thing.
     'songs.security.BlockMiddleware',
+    # Requests per minute, errors and timings for the admins' Monitor (cache only).
+    'songs.monitor.MonitorMiddleware',
     # Compress JSON responses. The feed page is ~20 posts of deeply nested JSON
     # with long R2 URLs repeated across rows — it compresses ~80%, which is the
     # single biggest latency win on a phone network. GZipMiddleware only acts

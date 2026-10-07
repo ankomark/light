@@ -2442,6 +2442,9 @@ export const signOutUser = (id, reason) =>
   apiRequest('post', `/admin/users/${id}/sign-out/`, { reason });
 export const fetchUserDevices = (id) => apiRequest('get', `/admin/users/${id}/devices/`);
 
+// How the server is doing (admin Monitor).
+export const fetchAdminMonitor = () => apiRequest('get', '/admin/monitor/');
+
 // ── The Security Centre (admin) ──────────────────────────────────────────────
 export const fetchSecurityCentre = () => apiRequest('get', '/admin/security-centre/');
 export const fetchLoginAttempts = ({ user, ip } = {}) => apiRequest('get', `/admin/security-centre/attempts/?${

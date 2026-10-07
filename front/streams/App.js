@@ -156,6 +156,7 @@ import AdminMusic from './components/admin/AdminMusic';
 import AdminVerify from './components/admin/AdminVerify';
 import AdminAppControl from './components/admin/AdminAppControl';
 import AdminSecurity from './components/admin/AdminSecurity';
+import AdminMonitor from './components/admin/AdminMonitor';
 import SecurityCheck from './pages/SecurityCheck';
 import RecoveryRequest from './pages/RecoveryRequest';
 import AdminBroadcast from './components/admin/AdminBroadcast';
@@ -589,6 +590,7 @@ const App = () => {
                 <Stack.Screen name="AdminVerify" component={AdminVerifyWrapper} />
                 <Stack.Screen name="AdminAppControl" component={AdminAppControlWrapper} />
                 <Stack.Screen name="AdminSecurity" component={AdminSecurityWrapper} />
+                <Stack.Screen name="AdminMonitor" component={AdminMonitorWrapper} />
                 <Stack.Screen name="SecurityCheck" component={SecurityCheck} options={{ headerShown: false }} />
                 <Stack.Screen name="RecoveryRequest" component={RecoveryRequest} options={{ headerShown: false }} />
                 <Stack.Screen name="AdminBroadcast" component={AdminBroadcastWrapper} />
@@ -1132,6 +1134,7 @@ const AdminMusicWrapper = adminWrap(AdminMusic);
 const AdminVerifyWrapper = adminWrap(AdminVerify);
 const AdminAppControlWrapper = adminWrap(AdminAppControl);
 const AdminSecurityWrapper = adminWrap(AdminSecurity);
+const AdminMonitorWrapper = adminWrap(AdminMonitor);
 const AdminBroadcastWrapper = adminWrap(AdminBroadcast);
 const AdminSinglesWrapper = adminWrap(AdminSingles);
 const AdminTicketsWrapper = adminWrap(AdminTickets);

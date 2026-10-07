@@ -26,6 +26,7 @@ const TOOLS = [
   ['manage_notices', 'NoticeBoard', 'bulletin-board', 'notices'],
   ['broadcast', 'AdminBroadcast', 'bullhorn-outline', 'broadcast'],
   ['manage_security', 'AdminSecurity', 'shield-alert-outline', 'security'],
+  ['view_analytics', 'AdminMonitor', 'heart-pulse', 'monitor'],
   ['manage_app', 'AdminAppControl', 'toggle-switch-outline', 'app'],
   ['verify_accounts', 'AdminVerify', 'check-decagram-outline', 'verify'],
   ['review_singles', 'AdminSingles', 'ring', 'singles'],

@@ -169,6 +169,14 @@ def send_expo_push(tokens, title, body, data=None):
         )
         result = response.json()
 
+        # For the admins' Monitor: how many went, how many Expo refused.
+        try:
+            from .monitor import record_push
+            items = result.get("data") or []
+            record_push(len(messages), sum(1 for item in items if item.get("status") == "error"))
+        except Exception:  # noqa: BLE001 — counting never stands in the way
+            pass
+
         # Deactivate any tokens that are no longer valid
         if "data" in result:
             from .models import DeviceToken
