@@ -44,6 +44,9 @@ NOTIFICATION_TITLES = {
 # delivered and cannot be turned off.
 NOTIFICATION_CATEGORIES = {
     'like': 'likes',
+    # A reaction to your story is a like by another name — and with no entry
+    # here it could not be switched off at all.
+    'story_reaction': 'likes',
     # "Your song reached 1,000 plays": good news about your music, like a like.
     'milestone': 'likes',
     'comment': 'comments',

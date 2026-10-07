@@ -116,3 +116,9 @@ class LogoutAfterDeleteTests(APITestCase):
         user.delete()
         r = self.client.post('/api/auth/logout/', {'refresh': refresh}, format='json')
         self.assertEqual(r.status_code, 205)
+
+
+class StoryReactionSwitchTests(APITestCase):
+    def test_story_reactions_are_under_likes(self):
+        from songs.push import NOTIFICATION_CATEGORIES
+        self.assertEqual(NOTIFICATION_CATEGORIES.get('story_reaction'), 'likes')

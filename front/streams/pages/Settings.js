@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useContext, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -134,6 +134,12 @@ const openLink = async (urls, fallbackMsg, t) => {
   Alert.alert(t('common.unavailable'), fallbackMsg || t('common.openLinkFailed'));
 };
 
+// One stylesheet for every part of the page, made on first use (makeStyles
+// is defined at the bottom of the file). Settings has a single look, so the
+// rows no longer each build a copy of it.
+let sharedStyles = null;
+const settingsStyles = () => sharedStyles || (sharedStyles = makeStyles(SETTINGS_COLORS));
+
 // ── Reusable building blocks ────────────────────────────────────────────────
 // What is typed in the search box at the top: rows that do not match hide,
 // and a section with nothing left in it hides too.
@@ -148,7 +154,7 @@ const rowsOf = (children) => React.Children.toArray(children).flatMap((el) => (
 
 const Section = ({ title, children }) => {
   const colors = SETTINGS_COLORS;
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = settingsStyles();
   const q = useContext(SettingsSearch);
   const titleMatches = !!q && matches(q, title);
   if (q && !titleMatches && !rowsOf(children).some((el) => matches(
@@ -167,7 +173,7 @@ const Section = ({ title, children }) => {
 
 const Row = ({ icon, iconColor, label, sub, keywords, right, onPress, last, danger, testID }) => {
   const colors = SETTINGS_COLORS;
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = settingsStyles();
   const q = useContext(SettingsSearch);
   const sectionMatched = useContext(SectionMatched);
   if (!sectionMatched && !matches(q, label, sub, keywords)) return null;
@@ -187,7 +193,11 @@ const Row = ({ icon, iconColor, label, sub, keywords, right, onPress, last, dang
         {sub ? <Text style={styles.rowSub} numberOfLines={2}>{sub}</Text> : null}
       </View>
       {right !== undefined
-        ? right
+        // A switch says nothing about itself to a screen reader ("switch,
+        // on"): it is given the row's own label unless it carries one.
+        ? (React.isValidElement(right) && right.type === Switch && !right.props.accessibilityLabel
+          ? React.cloneElement(right, { accessibilityLabel: label, accessibilityHint: sub || undefined })
+          : right)
         : onPress
         ? <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         : null}
@@ -207,7 +217,7 @@ const Row = ({ icon, iconColor, label, sub, keywords, right, onPress, last, dang
  *  { key, label, thumb? }. Found by search like a Row, its choices too. */
 const DropdownRow = ({ icon, label, sub, value, options, onChange, last, testID }) => {
   const colors = SETTINGS_COLORS;
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = settingsStyles();
   const q = useContext(SettingsSearch);
   const sectionMatched = useContext(SectionMatched);
   const [open, setOpen] = useState(false);
@@ -293,7 +303,7 @@ const Settings = ({ route } = {}) => {
   const { preferences: prefs, setPreference: updatePref } = usePreferences();
   const colors = SETTINGS_COLORS;
   const { t, language, setLanguage, languages } = useI18n();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = settingsStyles();
 
   const [isPrivate, setIsPrivate] = useState(!currentUser?.is_public);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
@@ -839,6 +849,7 @@ const Settings = ({ route } = {}) => {
                 <Switch
                   value={isPrivate}
                   onValueChange={handleTogglePrivate}
+                  accessibilityLabel={t('settings.privacy.privateAccount')}
                   disabled={savingPrivacy}
                   trackColor={{ false: colors.switchOff, true: colors.primary }}
                 ios_backgroundColor={colors.switchOff}

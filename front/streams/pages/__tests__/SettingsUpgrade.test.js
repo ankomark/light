@@ -335,3 +335,9 @@ test('opened from the Privacy Centre, it is already searched for the part asked 
   expect(screen.getByTestId('settings-search').props.value).toBe('settings.section.privacy');
   expect(screen.queryByText('settings.support.about')).toBeNull();
 });
+
+test('every switch is named for a screen reader', () => {
+  const screen = render(<Settings />);
+  expect(screen.getByTestId('push-switch').props.accessibilityLabel).toBe('settings.notif.push');
+  expect(screen.getByTestId('wallpaper-switch').props.accessibilityLabel).toBe('settings.wallpaper.label');
+});
