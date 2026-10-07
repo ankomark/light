@@ -216,7 +216,9 @@ def cut_off(user, reason):
     end_sessions(user, reason)
     try:
         from .views.auth import _revoke_other_sessions
-        _revoke_other_sessions(user)
+        # Signed out everywhere, so no phone of theirs keeps getting the
+        # account's notifications either.
+        _revoke_other_sessions(user, all_devices=True)
     except Exception:  # noqa: BLE001 — the admin sessions are what matter here
         pass
 

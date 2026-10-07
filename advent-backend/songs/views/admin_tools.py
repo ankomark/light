@@ -351,7 +351,12 @@ class AdminVerifyViewSet(viewsets.ViewSet):
         if kind not in kinds:
             return Response({'error': f'kind must be one of {list(kinds)}'}, status=status.HTTP_400_BAD_REQUEST)
         qs, name_of, owner_of, field, _ = kinds[kind]
-        obj = qs.filter(pk=request.data.get('id')).first()
+        try:
+            oid = int(request.data.get('id'))
+        except (TypeError, ValueError):
+            # Not a number: it reached the database and failed as a 500.
+            return Response({'error': 'id: a number'}, status=status.HTTP_400_BAD_REQUEST)
+        obj = qs.filter(pk=oid).first()
         if obj is None:
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
         verified = bool(request.data.get('verified'))

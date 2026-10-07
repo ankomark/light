@@ -10,7 +10,7 @@ import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminLogs, fetchAdminByUrl, verifyAdminLog } from '../../services/api';
-import { ErrorState } from './AdminKit';
+import { ErrorState, StaleNote } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 
@@ -163,9 +163,10 @@ const AdminLogs = () => {
           </Text>
         </View>
       )}
+      {failed && logs.length > 0 && <StaleNote onRetry={() => load(actor.trim().replace(/^@/, ''))} />}
       {loading && !logs.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
-      ) : failed ? (
+      ) : failed && !logs.length ? (
         <ErrorState onRetry={() => load(actor.trim().replace(/^@/, ''))} />
       ) : (
         <FlatList

@@ -56,6 +56,20 @@ export const ErrorState = ({ message, onRetry, testID = 'admin-error' }) => {
   );
 };
 
+/** Over a list kept from before when a refresh failed (offline, a slow
+ *  network): the last copy stays readable, and this says it may be old. */
+export const StaleNote = ({ onRetry }) => {
+  const { t } = useI18n();
+  return (
+    <TouchableOpacity style={styles.stale} onPress={onRetry} disabled={!onRetry} testID="admin-stale"
+      accessibilityRole={onRetry ? 'button' : 'text'}>
+      <Ionicons name="cloud-offline-outline" size={14} color={ADMIN.muted} />
+      <Text style={styles.staleText} numberOfLines={2}>{t('adminKit.stale')}</Text>
+      {!!onRetry && <Text style={styles.retryText}>{t('common.retry')}</Text>}
+    </TouchableOpacity>
+  );
+};
+
 const REASONS = ['spam', 'harassment', 'hate', 'sexual', 'violence', 'scam', 'copyright', 'impersonation', 'other'];
 
 /**
@@ -149,6 +163,11 @@ export const useReasonSheet = () => {
 const styles = StyleSheet.create({
   error: { alignItems: 'center', gap: 10, paddingVertical: 48, paddingHorizontal: 24 },
   errorText: { color: ADMIN.muted, fontSize: 14, textAlign: 'center' },
+  stale: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 16, marginTop: 8,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  staleText: { flex: 1, color: ADMIN.muted, fontSize: 12.5 },
   retry: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, backgroundColor: ADMIN.gold },
   retryText: { color: ADMIN.onGold, fontWeight: '800' },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },

@@ -14,7 +14,7 @@ import {
   draftQuizQuestions, rejectQuizDraft,
 } from '../../services/api';
 import { confirmAction, notify } from '../../utils/adminConfirm';
-import { ADMIN, ErrorState } from './AdminKit';
+import { ADMIN, ErrorState, StaleNote } from './AdminKit';
 import { BookPicker, ChapterRange, bookAt } from './QuizAdminKit';
 
 // `review`: Claude's drafts, off until a person has read them and switched them on.
@@ -261,9 +261,10 @@ export default function AdminQuizBank() {
              testID="quiz-state" />
       <TextInput style={styles.search} value={query} onChangeText={onQuery} placeholder={t('adminQuiz.search')}
                  placeholderTextColor="#5E7290" testID="quiz-search" />
+      {failed && rows.length > 0 && <StaleNote onRetry={() => load(language, state, query.trim())} />}
       {loading && !rows.length ? (
         <ActivityIndicator color={ADMIN.gold} style={{ marginTop: 40 }} />
-      ) : failed ? (
+      ) : failed && !rows.length ? (
         <ErrorState onRetry={() => load(language, state, query.trim())} />
       ) : (
         <FlatList

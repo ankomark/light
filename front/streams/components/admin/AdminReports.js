@@ -14,7 +14,7 @@ import { colors, typography, spacing, radius, shadows } from '../../constants/th
 import { useI18n } from '../../context/I18nContext';
 import { adminMemo } from '../../utils/adminSession';
 import { notify } from '../../utils/adminConfirm';
-import { useReasonSheet, ErrorState } from './AdminKit';
+import { useReasonSheet, ErrorState, StaleNote } from './AdminKit';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -283,9 +283,10 @@ const AdminReports = () => {
         })}
       </View>
 
+      {failed && reports.length > 0 && <StaleNote onRetry={() => load(filter, priority)} />}
       {loading && !reports.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
-      ) : failed ? (
+      ) : failed && !reports.length ? (
         <ErrorState onRetry={() => load(filter, priority)} />
       ) : (
         <FlatList

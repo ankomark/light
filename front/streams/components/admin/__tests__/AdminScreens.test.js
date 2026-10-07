@@ -53,6 +53,8 @@ const member = (extra) => ({
 });
 
 beforeEach(() => {
+  // Each test starts with nothing kept from the one before.
+  require('../../../utils/adminSession').adminMemo.clear();
   Object.keys(mockApi).forEach((k) => mockApi[k].mockReset());
   mockConfirm.mockClear();
   mockNotify.mockClear();
@@ -130,6 +132,17 @@ describe('reports', () => {
     const screen = asAdmin(<AdminReports />);
     await waitFor(() => expect(screen.getByText('admin.resolve')).toBeTruthy());
     expect(screen.queryByText('common.remove')).toBeNull();
+  });
+
+  test('a refresh that fails keeps the last copy, and says so', async () => {
+    mockApi.fetchAdminReports.mockResolvedValueOnce({ results: [{ id: 9, reason: 'spam', status: 'pending', content_type: 'post', object_id: 1 }] });
+    const first = asAdmin(<AdminReports />);
+    await waitFor(() => expect(mockApi.fetchAdminReports).toHaveBeenCalled());
+    first.unmount();
+    mockApi.fetchAdminReports.mockRejectedValue(new Error('offline'));
+    const screen = asAdmin(<AdminReports />);
+    await waitFor(() => expect(screen.getByTestId('admin-stale')).toBeTruthy());
+    expect(screen.queryByTestId('admin-error')).toBeNull();
   });
 
   test('a queue that could not be read is not shown as empty', async () => {

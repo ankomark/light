@@ -160,7 +160,8 @@ class AdminUserHistoryView(APIView):
             ('track', Track.objects.filter(artist=user).values_list('pk', flat=True)),
             ('product', Product.objects.filter(seller=user).values_list('pk', flat=True)),
         ):
-            theirs |= Q(content_type=ctype, object_id__in=list(ids))
+            # A subquery, not every id read into memory first.
+            theirs |= Q(content_type=ctype, object_id__in=ids)
         against = Report.objects.filter(theirs).order_by('-created_at')
         actions = AdminActionLog.objects.filter(target_type='user', target_id=user.pk).order_by('-created_at')[:30]
         devices = OutstandingToken.objects.filter(user=user, expires_at__gt=timezone.now(),

@@ -20,6 +20,7 @@ const memo = new Map();
 export const adminMemo = {
   get: (key) => memo.get(key),
   set: (key, value) => { memo.set(key, value); },
+  clear: () => { memo.clear(); },
 };
 
 export const adminToken = () => {

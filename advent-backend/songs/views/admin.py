@@ -222,16 +222,24 @@ def notify_moderation(user, subject, message):
         notify_user(user, 'system', message)
     except Exception:
         logger.exception('Moderation push failed')
-    try:
+    if not user.email:
+        return
+    site = getattr(settings, 'SITE_NAME', 'Adventist Life')
+
+    def _send():
         from django.core.mail import send_mail
-        if user.email:
-            send_mail(
-                subject=f"{getattr(settings, 'SITE_NAME', 'Adventist Life')} — {subject}",
-                message=f"Hi {user.username},\n\n{message}\n\n— {getattr(settings, 'SITE_NAME', 'Adventist Life')} Team",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=True,
-            )
+        send_mail(
+            subject=f"{site} — {subject}",
+            message=f"Hi {user.username},\n\n{message}\n\n— {site} Team",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+    # Off the moderator's request: a bulk takedown told dozens of authors one
+    # SMTP round trip at a time, and a slow mail server stalled the admin.
+    try:
+        from ..tasks import run_in_background
+        run_in_background(_send)
     except Exception:
         logger.exception('Moderation email failed')
 
@@ -664,6 +672,8 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             days = int(request.data.get('days') or 0)
         except (TypeError, ValueError):
             days = 0
+        # Ten years is "for good" in practice; more overflowed the date and failed.
+        days = max(0, min(days, 3650))
         user.is_suspended = True
         user.suspension_reason = reason
         user.suspended_at = timezone.now()
@@ -915,10 +925,21 @@ class AdminContentViewSet(viewsets.GenericViewSet):
 
         return _paginated(self, qs, ser_cls)
 
+    @staticmethod
+    def _one(request):
+        """(type, id) of the item acted on; id None when it is not a number
+        (it reached the database as a string and failed as a 500)."""
+        try:
+            oid = int(request.data.get('id'))
+        except (TypeError, ValueError):
+            oid = None
+        return request.data.get('type'), oid
+
     @action(detail=False, methods=['post'])
     def remove(self, request):
-        ctype = request.data.get('type')
-        oid = request.data.get('id')
+        ctype, oid = self._one(request)
+        if oid is None or ctype not in _CONTENT_MODELS:
+            return Response({'error': 'type and a numeric id'}, status=status.HTTP_400_BAD_REQUEST)
         reason, refused = reason_of(request)
         if refused:
             return refused
@@ -936,8 +957,9 @@ class AdminContentViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=['post'])
     def restore(self, request):
-        ctype = request.data.get('type')
-        oid = request.data.get('id')
+        ctype, oid = self._one(request)
+        if oid is None or ctype not in _CONTENT_MODELS:
+            return Response({'error': 'type and a numeric id'}, status=status.HTTP_400_BAD_REQUEST)
         if _protected_ids(request.user, ctype, [oid]):
             return _rank_refusal()
         if not _soft_remove(ctype, oid, False):
@@ -1089,10 +1111,13 @@ class AdminLogViewSet(viewsets.GenericViewSet):
             qs = qs.filter(target_type=p['target_type'])
         if str(p.get('target_id') or '').isdigit():
             qs = qs.filter(target_id=int(p['target_id']))
+        from datetime import date
         for key, lookup in (('since', 'created_at__date__gte'), ('until', 'created_at__date__lte')):
-            value = (p.get(key) or '')[:10]
-            if len(value) == 10:
-                qs = qs.filter(**{lookup: value})
+            try:
+                # A malformed date reached the database and failed as a 500.
+                qs = qs.filter(**{lookup: date.fromisoformat((p.get(key) or '')[:10])})
+            except ValueError:
+                pass
         return qs
 
     def list(self, request):

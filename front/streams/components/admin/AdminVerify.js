@@ -10,7 +10,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
 import { fetchVerifyList, fetchAdminByUrl, setVerified } from '../../services/api';
 import { confirmAction, notify } from '../../utils/adminConfirm';
-import { ADMIN, ErrorState, useReasonSheet } from './AdminKit';
+import { ADMIN, ErrorState, useReasonSheet, StaleNote } from './AdminKit';
 
 const KINDS = ['artist', 'seller', 'service', 'organization'];
 const STATES = ['', 'unverified', 'verified'];
@@ -138,9 +138,10 @@ export default function AdminVerify() {
         <TextInput style={styles.searchInput} value={query} onChangeText={onQuery} placeholder={t('adminVerify.search')}
                    placeholderTextColor="#5E7290" autoCapitalize="none" testID="verify-search" />
       </View>
+      {failed && rows.length > 0 && <StaleNote onRetry={() => load(kind, state, query.trim())} />}
       {loading && !rows.length ? (
         <ActivityIndicator color={ADMIN.gold} style={{ marginTop: 40 }} />
-      ) : failed ? (
+      ) : failed && !rows.length ? (
         <ErrorState onRetry={() => load(kind, state, query.trim())} />
       ) : (
         <FlatList

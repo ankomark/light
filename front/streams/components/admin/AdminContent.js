@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchAdminContent, fetchAdminByUrl, removeContent, restoreContent, bulkContent } from '../../services/api';
 import { notify } from '../../utils/adminConfirm';
-import { useReasonSheet, ErrorState } from './AdminKit';
+import { useReasonSheet, ErrorState, StaleNote } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 import { adminMemo } from '../../utils/adminSession';
@@ -273,9 +273,10 @@ const AdminContent = () => {
         </TouchableOpacity>
       </View>
 
+      {failed && items.length > 0 && <StaleNote onRetry={() => load(type, query.trim(), removedOnly)} />}
       {loading && !items.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
-      ) : failed ? (
+      ) : failed && !items.length ? (
         <ErrorState onRetry={() => load(type, query.trim(), removedOnly)} />
       ) : (
         <FlatList

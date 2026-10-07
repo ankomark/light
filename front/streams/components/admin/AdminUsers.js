@@ -10,7 +10,7 @@ import {
   fetchAdminUsers, fetchAdminByUrl, suspendUser, unsuspendUser, banUser, unbanUser, warnUser, clearUserProfile,
   fetchRoles, setUserSuperAdmin, assignUserRole, resetAdminTwoFactor, fetchUserHistory,
 } from '../../services/api';
-import { useAdminMe, useReasonSheet, ErrorState } from './AdminKit';
+import { useAdminMe, useReasonSheet, ErrorState, StaleNote } from './AdminKit';
 import { colors, typography, spacing, radius, shadows } from '../../constants/theme';
 import { useI18n } from '../../context/I18nContext';
 import { adminMemo } from '../../utils/adminSession';
@@ -221,9 +221,10 @@ const AdminUsers = () => {
         />
       </View>
 
+      {failed && users.length > 0 && <StaleNote onRetry={() => load(query.trim(), state)} />}
       {loading && !users.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
-      ) : failed ? (
+      ) : failed && !users.length ? (
         <ErrorState onRetry={() => load(query.trim(), state)} />
       ) : (
         <FlatList

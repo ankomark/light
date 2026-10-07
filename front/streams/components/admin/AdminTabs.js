@@ -6,6 +6,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../../context/I18nContext';
 import { useAdminMe } from './AdminKit';
 import { PULSE } from './PulseCharts';
@@ -30,6 +31,10 @@ export default function AdminTabs({ navigation, current, children }) {
   const { t } = useI18n();
   const { width } = useWindowDimensions();
   const tabs = useAdminTabs();
+  // Every admin screen sits in here: its lists clear the home indicator and
+  // the gesture bar (and the notch's sides held sideways) once, for all.
+  const insets = useSafeAreaInsets();
+  const edges = { paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right };
   // A tool reached from More keeps More lit.
   const active = TABS.some((tb) => tb.route === current) ? current : 'AdminMore';
   const go = (route) => { if (route !== current) navigation.replace(route); };
@@ -50,7 +55,7 @@ export default function AdminTabs({ navigation, current, children }) {
             );
           })}
         </View>
-        <View style={{ flex: 1, minWidth: 0 }}>{children}</View>
+        <View style={[{ flex: 1, minWidth: 0 }, edges]}>{children}</View>
       </View>
     );
   }
@@ -72,7 +77,7 @@ export default function AdminTabs({ navigation, current, children }) {
           })}
         </ScrollView>
       </View>
-      <View style={{ flex: 1 }}>{children}</View>
+      <View style={[{ flex: 1 }, edges]}>{children}</View>
     </View>
   );
 }

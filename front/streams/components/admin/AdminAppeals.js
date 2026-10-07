@@ -10,7 +10,7 @@ import { colors, typography, spacing, radius, shadows } from '../../constants/th
 import { useI18n } from '../../context/I18nContext';
 import { adminMemo } from '../../utils/adminSession';
 import { confirmAction, notify } from '../../utils/adminConfirm';
-import { ErrorState } from './AdminKit';
+import { ErrorState, StaleNote } from './AdminKit';
 
 const DEFAULT_AVATAR = require('../../assets/avatar-placeholder.jpg');
 
@@ -160,9 +160,10 @@ const AdminAppeals = () => {
         })}
       </View>
 
+      {failed && appeals.length > 0 && <StaleNote onRetry={() => load(filter)} />}
       {loading && !appeals.length ? (
         <View style={styles.centered}><ActivityIndicator size="large" color={colors.accent} /></View>
-      ) : failed ? (
+      ) : failed && !appeals.length ? (
         <ErrorState onRetry={() => load(filter)} />
       ) : (
         <FlatList
