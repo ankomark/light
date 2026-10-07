@@ -12,7 +12,7 @@ from collections import Counter
 
 from rest_framework.exceptions import NotFound
 
-from django.db.models import Count, F, Max
+from django.db.models import Count, F, Max, Q
 
 from .common import *  # noqa: F401,F403
 from ..models import CoinSpend, PuzzleProgress, PuzzleTheme, WordPuzzle
@@ -41,7 +41,26 @@ def _language(request):
     return lang if language_available(lang) else 'en'
 
 
-class PuzzleThemeViewSet(viewsets.ReadOnlyModelViewSet):
+class PuzzleSwitch:
+    """Switched off by an admin (Admin → App control): no boards are served
+    and nothing is paid — the app hiding the menu entry is not enough, since
+    a deep link or an older build still asks. The purse stays readable (coins
+    are shared with the quiz), and admins can still try boards out."""
+    OPEN_WHEN_OFF = ('wallet',)
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        from .. import app_settings
+        if getattr(self, 'action', None) in self.OPEN_WHEN_OFF:
+            return
+        if app_settings.status()['features'].get('puzzle', True):
+            return
+        if getattr(request.user, 'is_platform_admin', False):
+            return
+        raise PermissionDenied({'code': 'feature_off', 'detail': 'The word puzzle is switched off just now.'})
+
+
+class PuzzleThemeViewSet(PuzzleSwitch, viewsets.ReadOnlyModelViewSet):
     """The subjects on offer, and how far this player has got with each."""
     serializer_class = PuzzleThemeSerializer
     permission_classes = [IsAuthenticated]
@@ -171,7 +190,7 @@ def _tell_challenger(progress):
         pass
 
 
-class WordPuzzleViewSet(viewsets.GenericViewSet):
+class WordPuzzleViewSet(PuzzleSwitch, viewsets.GenericViewSet):
     """Play a level: read it, claim a word, buy a hint."""
     serializer_class = WordPuzzleSerializer
     permission_classes = [IsAuthenticated]
@@ -324,10 +343,20 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
             ranked = ranked.filter(user_id__in=members)
 
         top = list(ranked.select_related('user', 'user__profile')[:self.BOARD_SIZE])
-        order = list(ranked.values_list('user_id', flat=True))
+        # Your place, counted rather than read: listing every finisher's id
+        # to find one grew with the whole day's players.
         mine = next((p for p in top if p.user_id == request.user.pk), None)
-        if request.user.pk in order and not mine:
+        if not mine:
             mine = ranked.filter(user=request.user).first()
+        me = None
+        if mine:
+            ahead = ranked.filter(
+                Q(help__lt=mine.help)
+                | Q(help=mine.help, took__lt=mine.took)
+                | Q(help=mine.help, took=mine.took, completed_at__lt=mine.completed_at)
+            ).count()
+            me = {'rank': ahead + 1, 'of': ranked.count(),
+                  'seconds': _seconds(mine), 'stars': stars_for(mine)}
         return Response({
             'date': day,
             'results': [{
@@ -338,10 +367,7 @@ class WordPuzzleViewSet(viewsets.GenericViewSet):
                 'hints_used': p.hints_used,
                 'letters_used': p.letters_used,
             } for p in top],
-            'me': None if request.user.pk not in order else {
-                'rank': order.index(request.user.pk) + 1, 'of': len(order),
-                'seconds': _seconds(mine), 'stars': stars_for(mine),
-            },
+            'me': me,
         })
 
     BOARD_SIZE = 50

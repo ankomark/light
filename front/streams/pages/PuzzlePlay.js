@@ -277,8 +277,13 @@ const PuzzlePlay = ({ navigation, route }) => {
           : choice ? await fetchLevelOrNext(choice.theme, choice.level, lang)
             : await fetchNextPuzzle(lang);
       show(data);
-    } catch {
-      if (!current) setError(t('puzzle.loadFailed'));
+    } catch (e) {
+      // Switched off by an admin: say so, and do not leave a kept board up
+      // to play — every find on it would be refused.
+      if ((e?.response?.data || e?.data || {}).code === 'feature_off') {
+        setPuzzle(null);
+        setError(t('puzzle.off'));
+      } else if (!current) setError(t('puzzle.loadFailed'));
     } finally {
       setLoading(false);
     }

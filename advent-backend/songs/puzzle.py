@@ -676,9 +676,12 @@ def backfill(puzzle):
     language = puzzle.language or 'en'
     if not puzzle.bonus_words and puzzle.letters:
         on_board = {p['word'] for p in puzzle.placements}
-        puzzle.bonus_words = [w for w in words_from(puzzle.letters, language=language)
-                              if w not in on_board]
-        changed.append('bonus_words')
+        extra = [w for w in words_from(puzzle.letters, language=language) if w not in on_board]
+        # A board whose wheel spells nothing more has an empty list for good;
+        # writing it again on every open was a save on the path to play.
+        if extra:
+            puzzle.bonus_words = extra
+            changed.append('bonus_words')
     field = 'verse' if language == 'en' else 'sw_verse'
     if getattr(puzzle, f'{field}_id') is None:
         rng = random.Random(_seed_for(puzzle.theme.slug, puzzle.level))

@@ -4,6 +4,7 @@
 """
 from collections import Counter
 from datetime import timedelta
+from unittest import mock
 
 from django.core.cache import cache
 from django.db import connection
@@ -1313,6 +1314,20 @@ class DailyLeaderboardTests(APITestCase):
         self.assertEqual(res.data['results'][2]['stars'], 2)
         self.assertEqual(res.data['me'], {'rank': 1, 'of': 3, 'seconds': 180, 'stars': 3})
 
+    def test_my_place_is_counted_below_the_board(self):
+        """Ranked past the fifty shown: the place is still right, ties
+        included (less help, then quicker, then who finished first)."""
+        from songs.views.puzzle import WordPuzzleViewSet
+        for n in range(4):
+            self._finished(User.objects.create_user(f'p{n}', f'p{n}@x.com', 'pw12345!'), 2)
+        self._finished(User.objects.create_user('slowest', 'z@x.com', 'pw12345!'), 9)
+        self._finished(self.me, 4)
+        with mock.patch.object(WordPuzzleViewSet, 'BOARD_SIZE', 2):
+            res = self.client.get('/api/puzzles/daily/leaderboard/')
+        self.assertEqual(len(res.data['results']), 2)
+        self.assertEqual(res.data['me']['rank'], 5)
+        self.assertEqual(res.data['me']['of'], 6)
+
     def test_unfinished_boards_are_not_ranked(self):
         PuzzleProgress.objects.create(user=self.me, puzzle=self.puzzle)
         res = self.client.get('/api/puzzles/daily/leaderboard/')
@@ -1549,3 +1564,24 @@ class RebuildCommandTests(APITestCase):
         call_command('rebuild_puzzle_levels', stdout=StringIO())
         self.assertEqual(WordPuzzle.objects.get(pk=played.pk).letters, 'ZZZZZ')
         self.assertNotEqual(WordPuzzle.objects.get(pk=untouched.pk).letters, 'ZZZZZ')
+
+
+class PuzzleSwitchTests(APITestCase):
+    """Admin → App control → puzzle off: the server stops serving boards too."""
+
+    def setUp(self):
+        from songs import app_settings
+        cache.clear()
+        self.user = User.objects.create_user('mark', 'm@x.com', 'pw12345!')
+        app_settings.save('features', {'puzzle': False}, self.user)
+        self.client.force_authenticate(self.user)
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_boards_are_refused_and_the_purse_stays_readable(self):
+        for url in ('/api/puzzles/next/', '/api/puzzles/daily/', '/api/puzzle-themes/'):
+            res = self.client.get(url)
+            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN, url)
+            self.assertEqual(res.data['code'], 'feature_off')
+        self.assertEqual(self.client.get('/api/puzzles/wallet/').status_code, 200)
