@@ -30,7 +30,8 @@ const ForgotPasswordScreen = () => {
       await forgotPassword(trimmed);
       setSent(true);
     } catch (err) {
-      // Surface the backend message (e.g. "No account is registered with this email").
+      // The server answers the same for any address (it never says which have
+      // accounts), so what lands here is a real failure, such as mail being down.
       setError(err.response?.data?.error || t('forgot.genericError'));
     } finally {
       setLoading(false);
@@ -58,8 +59,8 @@ const ForgotPasswordScreen = () => {
         {sent ? (
           <>
             <Text style={styles.subtitle}>
-              Check email spam folder We sent a 6-digit code to{'\n'}
-              <Text style={styles.highlight}>{email.trim()}</Text>
+              {t('forgot.sentTo')}{'\n'}
+              <Text style={styles.highlight}>{email.trim()}</Text>{'\n\n'}{t('forgot.checkSpam')}
             </Text>
             <TouchableOpacity
               style={styles.button}

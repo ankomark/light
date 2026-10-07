@@ -122,3 +122,41 @@ class StoryReactionSwitchTests(APITestCase):
     def test_story_reactions_are_under_likes(self):
         from songs.push import NOTIFICATION_CATEGORIES
         self.assertEqual(NOTIFICATION_CATEGORIES.get('story_reaction'), 'likes')
+
+
+class ForgotPasswordPrivacyTests(APITestCase):
+    def test_the_answer_does_not_say_who_has_an_account(self):
+        from unittest import mock
+        cache.clear()
+        User.objects.create_user('member', 'member@x.com', 'oldpass123')
+        with mock.patch('django.core.mail.send_mail') as send:
+            known = self.client.post('/api/auth/forgot-password/', {'email': 'member@x.com'}, format='json')
+            cache.clear()
+            unknown = self.client.post('/api/auth/forgot-password/', {'email': 'nobody@x.com'}, format='json')
+        self.assertEqual(known.status_code, unknown.status_code)
+        self.assertEqual(known.data, unknown.data)
+        self.assertEqual(send.call_count, 1)
+
+
+class FullerExportTests(APITestCase):
+    def test_messages_groups_and_books_are_in_it_but_not_the_other_side(self):
+        from songs.models import Conversation, Group, GroupMember, GroupPost, Message, Publication
+        cache.clear()
+        me = User.objects.create_user('exporter', 'ex@x.com', 'oldpass123')
+        friend = User.objects.create_user('friend', 'fr@x.com', 'oldpass123')
+        chat = Conversation.objects.create()
+        chat.participants.add(me, friend)
+        Message.objects.create(conversation=chat, sender=me, content='mine to send')
+        Message.objects.create(conversation=chat, sender=friend, content='theirs to keep')
+        group = Group.objects.create(name='Choir', creator=me)
+        GroupMember.objects.create(group=group, user=me, is_admin=True)
+        GroupPost.objects.create(group=group, user=me, content='practice at six')
+        Publication.objects.create(title='My Book', author=me)
+        self.client.force_authenticate(me)
+        data = self.client.get('/api/auth/export-data/').data
+        self.assertEqual([m['content'] for m in data['messages_sent']], ['mine to send'])
+        self.assertEqual(data['messages_sent'][0]['to'], ['friend'])
+        self.assertNotIn('theirs to keep', str(data))
+        self.assertEqual(data['groups'][0]['name'], 'Choir')
+        self.assertEqual(data['group_posts'][0]['content'], 'practice at six')
+        self.assertEqual(data['books_written'][0]['title'], 'My Book')

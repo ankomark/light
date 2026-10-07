@@ -160,16 +160,12 @@ class ForgotPasswordView(APIView):
         if not email:
             return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            user = User.objects.get(email__iexact=email)
-        except User.DoesNotExist:
-            # Product choice: give clear feedback for a community app. (This trades
-            # off email-enumeration protection — switch back to a generic success
-            # message if that ever becomes a concern.)
-            return Response(
-                {'error': 'No account is registered with this email address.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        # The same answer whether or not the email has an account: saying "no
+        # account" let anyone test which addresses are members here.
+        sent = Response({'message': 'If an account uses this email, a reset code has been sent to it.'})
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            return sent
 
         code = f"{secrets.randbelow(1000000):06d}"
         expires_at = timezone.now() + timedelta(minutes=15)
@@ -199,7 +195,7 @@ class ForgotPasswordView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        return Response({'message': 'A reset code has been sent to your email.'})
+        return sent
 
 
 
@@ -458,7 +454,67 @@ class ExportDataView(APIView):
             ],
         }
         data.update(_more_to_export(u, iso))
+        data.update(_conversations_and_books(u, iso))
         return Response(data)
+
+
+# The most of each kind an export carries: enough for anyone's real history,
+# bounded so one request can never read a whole table.
+EXPORT_MAX = 2000
+
+
+def _conversations_and_books(u, iso):
+    """What a person wrote to others and read: their side of direct messages
+    (with whom, when), the groups they are in and what they posted there,
+    their books, highlights and reading, their stories and quiz rounds.
+
+    Only what they wrote themselves: the other side of a chat is the other
+    person's, and is not handed over in someone else's export."""
+    from ..models import (
+        BookHighlight, GroupMember, GroupPost, Message, Publication, QuizSession, ReadingProgress, Story,
+    )
+    messages = (Message.objects.filter(sender=u, is_deleted=False)
+                .select_related('conversation').prefetch_related('conversation__participants')
+                .order_by('-created_at')[:EXPORT_MAX])
+    return {
+        'messages_sent': [{
+            'to': sorted(p.username for p in m.conversation.participants.all() if p.pk != u.pk),
+            'type': m.message_type, 'content': m.content, 'attachment': m.attachment or None,
+            'created_at': iso(m.created_at), 'edited_at': iso(m.edited_at),
+        } for m in messages],
+        'groups': [{
+            'name': gm.group.name, 'joined_at': iso(gm.joined_at),
+            'admin': gm.is_admin, 'moderator': gm.is_moderator,
+        } for gm in GroupMember.objects.filter(user=u).select_related('group').order_by('-joined_at')[:EXPORT_MAX]],
+        'group_posts': [{
+            'group': gp.group.name, 'type': gp.message_type, 'content': gp.content,
+            'attachment': gp.attachment or None, 'created_at': iso(gp.created_at),
+        } for gp in (GroupPost.objects.filter(user=u, is_removed=False).select_related('group')
+                     .order_by('-created_at')[:EXPORT_MAX])],
+        'books_written': [{
+            'title': p.title, 'summary': p.summary, 'status': p.status,
+            'created_at': iso(p.created_at), 'published_at': iso(p.published_at),
+            'chapters': [{'order': c.order, 'title': c.title, 'body': c.body, 'status': c.status}
+                         for c in p.chapters.filter(is_removed=False).order_by('order')],
+        } for p in Publication.objects.filter(author=u).prefetch_related('chapters').order_by('-created_at')[:200]],
+        'book_highlights': [{
+            'book': h.publication.title, 'quote': h.quote, 'note': h.note,
+            'collection': h.collection, 'created_at': iso(h.created_at),
+        } for h in (BookHighlight.objects.filter(user=u, deleted=False).select_related('publication')
+                    .order_by('-created_at')[:EXPORT_MAX])],
+        'reading': [{
+            'book': r.publication.title, 'percent': round(r.percent, 1),
+            'finished_at': iso(r.finished_at), 'updated_at': iso(r.updated_at),
+        } for r in ReadingProgress.objects.filter(user=u).select_related('publication').order_by('-updated_at')[:500]],
+        'stories': [{
+            'caption': s.caption, 'type': s.content_type, 'media': s.media_url or None,
+            'created_at': iso(s.created_at),
+        } for s in Story.objects.filter(user=u, is_removed=False).order_by('-created_at')[:500]],
+        'quiz_rounds': [{
+            'mode': q.mode, 'topic': q.topic or None, 'points': q.points,
+            'started_at': iso(q.started_at), 'finished_at': iso(q.finished_at),
+        } for q in QuizSession.objects.filter(user=u, is_finished=True).order_by('-started_at')[:500]],
+    }
 
 
 def _more_to_export(u, iso):
