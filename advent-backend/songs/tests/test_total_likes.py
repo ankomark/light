@@ -179,9 +179,10 @@ class LiveLikeTests(APITestCase):
         self.assertEqual(total(self.host), 0)
 
     def test_per_call_clamp_still_applies(self):
-        # The endpoint caps one flush at 100; the profile stat must agree.
+        # The endpoint caps one flush; the profile stat must agree.
+        from songs.views.live import MAX_LIKES_PER_CALL
         self._react(500)
-        self.assertEqual(total(self.host), 100)
+        self.assertEqual(total(self.host), MAX_LIKES_PER_CALL)
 
 
 class RemovedContentLikesTests(APITestCase):

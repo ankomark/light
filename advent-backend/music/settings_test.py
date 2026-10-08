@@ -56,3 +56,9 @@ SECTION_SWITCHES = False
 
 # And the blocked-address check (songs/security.py): on in its own tests.
 SECURITY_BLOCKS = False
+
+# Never the real LiveKit server from a test run: with the .env keys loaded,
+# tests created and deleted rooms on it. Tests that need tokens set their own.
+LIVEKIT_URL = ''
+LIVEKIT_API_KEY = 'test-key'
+LIVEKIT_API_SECRET = 'test-secret-test-secret-test-secret-0'

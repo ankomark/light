@@ -295,9 +295,10 @@ class LiveReactionsAreUncappedTests(APITestCase):
         self.assertEqual(self.broadcast.like_count, 10)
 
     def test_one_call_is_still_clamped(self):
+        from songs.views.live import MAX_LIKES_PER_CALL
         self._react(10_000)
         self.broadcast.refresh_from_db()
-        self.assertEqual(self.broadcast.like_count, 100)
+        self.assertEqual(self.broadcast.like_count, MAX_LIKES_PER_CALL)
 
     def test_hearts_stop_when_the_room_ends(self):
         self._react(4)

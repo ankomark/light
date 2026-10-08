@@ -1,5 +1,7 @@
 from .common import *  # noqa: F401,F403
+import re
 import uuid
+from datetime import timedelta
 from django.db.models import F
 from django.utils import timezone
 from ..models import LiveBroadcast, CoHostRequest
@@ -15,6 +17,59 @@ MAX_COHOSTS = 4
 # heavier commitment than an audio Meet, so it needs a larger following.
 MIN_FOLLOWERS = {'tv': 1000, 'meet': 100}
 KIND_LABEL = {'tv': 'Go-Live', 'meet': 'Meet'}
+
+# A broadcast still "live" this long after it started lost its host without
+# LiveKit telling us (no webhook, a crash): it is ended when the hub is read,
+# so the hub never shows a frozen room forever.
+STALE_AFTER = timedelta(hours=12)
+# Likes one flush may add: the app flushes every 5 s, a fast thumb manages
+# perhaps 10 taps a second.
+MAX_LIKES_PER_CALL = 50
+OVERLAY_STYLES = ('lower3', 'banner', 'nametag', 'ticker')
+# Control characters (newlines included) out of titles shown on cards.
+_CONTROL = re.compile(r'[\x00-\x1f\x7f]')
+
+
+def _clean_title(text, limit):
+    return _CONTROL.sub(' ', str(text or '')).strip()[:limit]
+
+
+def _int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _admin_may(request):
+    """An admin whose role may take content down - through the admin gate
+    (good standing, two-step session), like every other admin power."""
+    return admin_gate(request, lambda u: u.has_capability('remove_content'))
+
+
+def _log_admin(request, action, b):
+    from .admin import log_admin_action
+    log_admin_action(request.user, action, 'livebroadcast', b.id, reason=f'@{b.host.username}: {b.title}'[:200])
+
+
+def reap_stale():
+    """End broadcasts whose host vanished without LiveKit telling us."""
+    LiveBroadcast.objects.filter(status='live', started_at__lt=timezone.now() - STALE_AFTER).update(
+        status='ended', ended_at=timezone.now())
+
+
+def _may_watch(user, b):
+    """None if `user` may be in this broadcast, else (message, code)."""
+    if b.host_id == user.id or user.is_super_admin:
+        return None   # a block by the host can't shut a super admin out
+    if is_blocked_between(user, b.host):
+        return ('You cannot join this broadcast.', 'blocked')
+    if b.singles_only and not user.is_platform_admin and not _approved_single(user):
+        return ('This room is for Single & Searching members.', 'singles_only')
+    # Removed by the host (or an admin): not back in for the rest of it.
+    if CoHostRequest.objects.filter(broadcast=b, user=user, status='removed').exists():
+        return ('The host removed you from this broadcast.', 'removed')
+    return None
 
 
 def _approved_single(user):
@@ -69,12 +124,24 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             self.throttle_scope = 'go_live'
         elif self.action == 'request_cohost':
             self.throttle_scope = 'cohost_request'
+        elif self.action == 'react':
+            self.throttle_scope = 'live_react'
+        elif self.action == 'overlay':
+            self.throttle_scope = 'live_action'
         return super().get_throttles()
 
     # ── Discovery ────────────────────────────────────────────────────────────
     def list(self, request):
+        reap_stale()
         # Single & Searching rooms are listed only inside it (views/singles_hub).
-        qs = self.get_queryset().filter(singles_only=False)
+        # Hosts either side blocked, and deactivated accounts, aren't shown.
+        qs = (self.get_queryset().filter(singles_only=False, host__is_active=True, host__is_deactivated=False)
+              .exclude(host_id__in=blocked_ids_for(request.user)))
+        # People I follow first, then the busiest rooms, then the newest:
+        # the big card at the top is the one most worth opening.
+        from django.db.models import Exists, OuterRef
+        follows = User.followers.through.objects.filter(from_user=OuterRef('host_id'), to_user=request.user.id)
+        qs = qs.annotate(followed=Exists(follows)).order_by('-followed', '-viewer_count', '-started_at')
         page = self.paginate_queryset(qs)
         data = LiveBroadcastListSerializer(
             page if page is not None else qs, many=True, context={'request': request},
@@ -88,10 +155,22 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
         return Response(LiveBroadcastSerializer(b, context={'request': request}).data)
 
+    @action(detail=False, methods=['get'])
+    def eligibility(self, request):
+        """Who may start what, before they set anything up: the Go Live
+        screen shows what is still needed instead of failing at the end."""
+        followers = request.user.followers.count()
+        exempt = request.user.is_platform_admin
+        return Response({
+            'followers': followers,
+            'needed': MIN_FOLLOWERS,
+            'allowed': {k: exempt or followers >= n for k, n in MIN_FOLLOWERS.items()},
+        })
+
     # ── Go live (host) ─────────────────────────────────────────────────────────
     def create(self, request):
         kind = request.data.get('kind', 'meet')
-        title = (request.data.get('title') or '').strip()
+        title = _clean_title(request.data.get('title'), 200)
         if kind not in dict(LiveBroadcast.KIND_CHOICES):
             return Response({'error': 'kind must be meet|tv'}, status=status.HTTP_400_BAD_REQUEST)
         if not title:
@@ -111,7 +190,8 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             needed = MIN_FOLLOWERS.get(kind, 0)
             if needed and request.user.followers.count() < needed:
                 return Response(
-                    {'error': f"You need {needed:,} followers to start a {KIND_LABEL.get(kind, kind)}."},
+                    {'error': f"You need {needed:,} followers to start a {KIND_LABEL.get(kind, kind)}.",
+                     'code': 'followers_needed', 'needed': needed},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
@@ -141,26 +221,28 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         return Response(_broadcast_payload(broadcast, token, request), status=status.HTTP_201_CREATED)
 
     def _notify_followers(self, host, broadcast):
-        msg = f"{host.username} is live on air: {broadcast.title}"
-        data = {'type': 'live', 'broadcast_id': broadcast.id}
-        for follower in host.followers.all().iterator():
-            try:
-                notify_user(follower, 'live', msg, data)
-            except Exception:
-                logger.exception('live notify failed')
+        """One push to every follower, in batches off the request thread: one
+        notify_user per follower made a host with thousands wait minutes on
+        the Go Live button."""
+        from ..push import notify_many
+        ids = list(host.followers.values_list('id', flat=True))
+        if not ids:
+            return
+        try:
+            notify_many(ids, 'live', f"{host.username} is live on air: {broadcast.title}",
+                        {'type': 'live', 'broadcast_id': broadcast.id})
+        except Exception:
+            logger.exception('live notify failed')
 
     # ── Join (viewer) ──────────────────────────────────────────────────────────
     @action(detail=True, methods=['get'])
     def token(self, request, pk=None):
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.status != 'live':
-            return Response({'error': 'This broadcast has ended.'}, status=status.HTTP_410_GONE)
-        # Super admins can join any broadcast — a block by the host can't shut them out.
-        if not request.user.is_super_admin and is_blocked_between(request.user, b.host):
-            return Response({'error': 'You cannot join this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
-        if b.singles_only and not request.user.is_platform_admin and not _approved_single(request.user):
-            return Response({'error': 'This room is for Single & Searching members.', 'code': 'singles_only'},
-                            status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'This broadcast has ended.', 'code': 'ended'}, status=status.HTTP_410_GONE)
+        refused = _may_watch(request.user, b)
+        if refused:
+            return Response({'error': refused[0], 'code': refused[1]}, status=status.HTTP_403_FORBIDDEN)
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
             room=b.room_name, can_publish=False,  # viewers are subscribe-only
@@ -173,18 +255,18 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         """Batch-increment the broadcast's like tally. Clients flush the number
         of ❤️ reactions they produced since the last call, so the persisted total
         survives rejoins. Clamped so one call can't inflate the count."""
-        try:
-            n = int(request.data.get('count') or 1)
-        except (TypeError, ValueError):
-            n = 1
-        n = max(1, min(n, 100))
-        applied = LiveBroadcast.objects.filter(pk=pk, status='live').update(like_count=F('like_count') + n)
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
+        if _may_watch(request.user, b):
+            return Response({'error': 'You cannot react here.'}, status=status.HTTP_403_FORBIDDEN)
+        n = max(1, min(_int(request.data.get('count')) or 1, MAX_LIKES_PER_CALL))
+        applied = LiveBroadcast.objects.filter(pk=b.pk, status='live', is_removed=False).update(
+            like_count=F('like_count') + n)
         # Credit the host's lifetime like total only when the tally actually
-        # moved — reactions sent to an already-ended room are a no-op above and
-        # must not inflate the profile stat either.
-        if applied:
+        # moved (an ended room is a no-op above), and never for the host's own
+        # taps on their own broadcast.
+        if applied and b.host_id != request.user.id:
             credit_user_likes(b.host_id, n)
+        b.refresh_from_db(fields=['like_count'])
         return Response({'like_count': b.like_count})
 
     # ── On-screen graphic (lower third / banner / name tag / ticker) ─────────────
@@ -197,7 +279,9 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         is_cohost = b.cohost_requests.filter(user=request.user, status='approved').exists()
         if b.host_id != request.user.id and not is_cohost and not request.user.is_super_admin:
             return Response({'error': 'Only the host or a co-host can set on-screen text.'}, status=status.HTTP_403_FORBIDDEN)
-        title = (request.data.get('title') or '').strip()
+        if b.status != 'live':
+            return Response({'error': 'This broadcast has ended.', 'code': 'ended'}, status=status.HTTP_410_GONE)
+        title = _clean_title(request.data.get('title'), 120)
         if request.data.get('clear') or not title:
             b.overlay = None
         else:
@@ -206,10 +290,12 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
                     return round(min(1.0, max(0.0, float(v))), 4)
                 except (TypeError, ValueError):
                     return None
+            style = request.data.get('style')
             b.overlay = {
-                'style': request.data.get('style') or 'lower3',
-                'title': title[:120],
-                'sub': (request.data.get('sub') or '').strip()[:80],
+                # Only the styles the app draws: anything else is a lower third.
+                'style': style if style in OVERLAY_STYLES else 'lower3',
+                'title': title,
+                'sub': _clean_title(request.data.get('sub'), 80),
                 'x': _frac(request.data.get('x')),
                 'y': _frac(request.data.get('y')),
             }
@@ -220,14 +306,18 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
-        # The host ends their own broadcast; a super admin can end anyone's.
-        if b.host_id != request.user.id and not request.user.is_super_admin:
+        # The host ends their own broadcast; an admin who may take content
+        # down can end anyone's - on the record.
+        by_admin = b.host_id != request.user.id
+        if by_admin and not _admin_may(request):
             return Response({'error': 'Only the host or an admin can end this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
         if b.status != 'ended':
             b.status = 'ended'
             b.ended_at = timezone.now()
             b.save(update_fields=['status', 'ended_at'])
             lk.end_room(b.room_name)
+            if by_admin:
+                _log_admin(request, 'end_live', b)
         return Response(LiveBroadcastSerializer(b).data)
 
     # ── Delete (host or super admin) ────────────────────────────────────────────
@@ -235,10 +325,13 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         """Remove a broadcast entirely. The host can delete their own; a super
         admin can delete any. A still-live room is torn down first."""
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
-        if b.host_id != request.user.id and not request.user.is_super_admin:
+        by_admin = b.host_id != request.user.id
+        if by_admin and not _admin_may(request):
             return Response({'error': 'Only the host or an admin can delete this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
         if b.status == 'live':
             lk.end_room(b.room_name)
+        if by_admin:
+            _log_admin(request, 'delete_live', b)
         b.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -250,18 +343,23 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             return Response({'error': 'Broadcast has ended.'}, status=status.HTTP_410_GONE)
         if b.host_id == request.user.id:
             return Response({'error': "You're the host."}, status=status.HTTP_400_BAD_REQUEST)
-        if is_blocked_between(request.user, b.host):
-            return Response({'error': 'You cannot join this broadcast.'}, status=status.HTTP_403_FORBIDDEN)
+        refused = _may_watch(request.user, b)
+        if refused:
+            return Response({'error': refused[0], 'code': refused[1]}, status=status.HTTP_403_FORBIDDEN)
         req, _created = CoHostRequest.objects.get_or_create(
             broadcast=b, user=request.user,
             defaults={'status': 'pending'},
         )
-        if not _created and req.status in ('rejected', 'left'):
+        asked_again = not _created and req.status in ('rejected', 'left')
+        if asked_again:
             req.status = 'pending'
             req.save(update_fields=['status'])
-        notify_user(b.host, 'cohost_request', f"{request.user.username} wants to co-host", {
-            'type': 'cohost_request', 'broadcast_id': b.id, 'request_id': req.id,
-        })
+        # One push per request: asking again while still waiting does not
+        # buzz the host's phone again.
+        if _created or asked_again:
+            notify_user(b.host, 'cohost_request', f"{request.user.username} wants to co-host", {
+                'type': 'cohost_request', 'broadcast_id': b.id, 'request_id': req.id,
+            })
         return Response(CoHostRequestSerializer(req).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='cohost-requests')
@@ -277,7 +375,10 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.host_id != request.user.id:
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
-        req = get_object_or_404(CoHostRequest, pk=request.data.get('request_id'), broadcast=b)
+        if b.status != 'live':
+            return Response({'error': 'This broadcast has ended.', 'code': 'ended'}, status=status.HTTP_410_GONE)
+        # A text id reached the database and failed as a 500.
+        req = get_object_or_404(CoHostRequest, pk=_int(request.data.get('request_id')) or 0, broadcast=b)
         if req.status != 'approved' and b.cohost_requests.filter(status='approved').count() >= MAX_COHOSTS:
             return Response(
                 {'error': f'Maximum of {MAX_COHOSTS} co-hosts on stage.'},
@@ -298,7 +399,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.host_id != request.user.id:
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
-        req = get_object_or_404(CoHostRequest, pk=request.data.get('request_id'), broadcast=b)
+        req = get_object_or_404(CoHostRequest, pk=_int(request.data.get('request_id')) or 0, broadcast=b)
         req.status = 'rejected'
         req.save(update_fields=['status'])
         return Response(CoHostRequestSerializer(req).data)
@@ -309,9 +410,12 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.status != 'live':
             return Response({'error': 'This broadcast has ended.'}, status=status.HTTP_410_GONE)
-        approved = b.cohost_requests.filter(user=request.user, status='approved').exists()
-        if not approved:
-            return Response({'error': 'Not approved as a co-host.'}, status=status.HTTP_403_FORBIDDEN)
+        mine = b.cohost_requests.filter(user=request.user).values_list('status', flat=True).first()
+        if mine != 'approved':
+            # 'pending': keep asking. Anything else is an answer: the app
+            # stops asking every few seconds for the rest of the broadcast.
+            return Response({'error': 'Not approved as a co-host.', 'code': mine or 'none'},
+                            status=status.HTTP_403_FORBIDDEN)
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
             room=b.room_name, can_publish=True,
@@ -322,13 +426,21 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'])
     def moderate(self, request, pk=None):
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
-        if b.host_id != request.user.id and not request.user.is_super_admin:
+        by_admin = b.host_id != request.user.id
+        if by_admin and not _admin_may(request):
             return Response({'error': 'Host only.'}, status=status.HTTP_403_FORBIDDEN)
-        target_user_id = request.data.get('user_id')
-        if not target_user_id:
+        target = User.objects.filter(pk=_int(request.data.get('user_id')) or 0).first()
+        if target is None:
             return Response({'error': 'user_id required'}, status=status.HTTP_400_BAD_REQUEST)
-        lk.remove_participant(b.room_name, f"u{target_user_id}")
-        CoHostRequest.objects.filter(broadcast=b, user_id=target_user_id).update(status='left')
+        if target.id == b.host_id:
+            return Response({'error': 'The host cannot be removed; end the broadcast instead.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        lk.remove_participant(b.room_name, _identity(target))
+        # Out for the rest of this broadcast: a fresh join token is refused
+        # (before, they were back in a tap later).
+        CoHostRequest.objects.update_or_create(broadcast=b, user=target, defaults={'status': 'removed'})
+        if by_admin:
+            _log_admin(request, 'live_remove_participant', b)
         return Response({'status': 'removed'})
 
 

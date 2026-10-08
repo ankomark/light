@@ -21,7 +21,7 @@ import {
   LiveKitRoom, AudioSession, useParticipants, useLocalParticipant, useRoomContext,
   useTracks, VideoTrack,
 } from '@livekit/react-native';
-import { Track, RoomEvent, ConnectionState, setLogLevel } from 'livekit-client';
+import { Track, RoomEvent, ConnectionState, DisconnectReason, setLogLevel } from 'livekit-client';
 import {
   endBroadcast, requestCohost, fetchCohostRequests, approveCohost, rejectCohost,
   fetchCohostToken, moderateBroadcast, followUser, reactBroadcast, setBroadcastOverlay,
@@ -82,7 +82,12 @@ const decodeData = (u8) => {
   } catch { return null; }
 };
 
-const KIND_LABEL = { meet: 'MEET', tv: 'GO-LIVE' };
+const KIND_KEY = { meet: 'live.kindMeet', tv: 'live.kindTv' };
+// Longest chat line drawn (the composer stops at 200 too; a hand-made
+// message could be any length and flood the dock).
+const CHAT_MAX = 200;
+// Fewest milliseconds between two of my own chat lines.
+const CHAT_GAP_MS = 700;
 
 const fmtElapsed = (totalSec) => {
   const s = Math.max(0, totalSec);
@@ -112,6 +117,9 @@ const LiveRoom = ({ navigation, route }) => {
   // Set while we intentionally reconnect for a promotion, so the unmount's
   // disconnect doesn't bounce us out of the screen.
   const promotingRef = useRef(false);
+  // Set once leaving is decided (or the room is gone), so the host's "leave
+  // your broadcast?" question isn't asked on the way out.
+  const leavingRef = useRef(false);
   const canPublish = role === 'host' || role === 'cohost';
   const isVideo = broadcast.kind === 'tv';
   // On promotion we swap to a publish token, which makes LiveKitRoom reconnect
@@ -173,9 +181,16 @@ const LiveRoom = ({ navigation, route }) => {
       options={{ adaptiveStream: false }}
       onError={(e) => console.warn('LiveKit error', e)}
       onConnected={() => { promotingRef.current = false; }}
-      onDisconnected={() => {
+      onDisconnected={(reason) => {
         if (promotingRef.current) { promotingRef.current = false; return; } // promotion reconnect
-        navigation.goBack();
+        leavingRef.current = true;
+        // Say why, unless I left myself: before, the screen just vanished.
+        const why = reason === DisconnectReason.ROOM_DELETED ? 'live.ended'
+          : reason === DisconnectReason.PARTICIPANT_REMOVED ? 'live.removedYou'
+            : reason === DisconnectReason.CLIENT_INITIATED || reason == null ? null
+              : 'live.connectionLost';
+        if (why && initialRole !== 'host') Alert.alert(t('live.title'), t(why));
+        if (navigation.canGoBack?.() !== false) navigation.goBack();
       }}
       style={styles.root}
     >
@@ -187,8 +202,9 @@ const LiveRoom = ({ navigation, route }) => {
         initialMicOn={initialMicOn !== false}
         initialCamOn={isVideo && initialCamOn !== false}
         navigation={navigation}
-        onPromoted={(t) => {
-          if (t && t !== token) { promotingRef.current = true; setToken(t); }
+        leavingRef={leavingRef}
+        onPromoted={(next) => {
+          if (next && next !== token) { promotingRef.current = true; setToken(next); }
           setRole('cohost');
         }}
       />
@@ -197,7 +213,7 @@ const LiveRoom = ({ navigation, route }) => {
 };
 
 const RoomInner = ({
-  broadcast, role, canPublish, isVideo, initialMicOn, initialCamOn, navigation, onPromoted,
+  broadcast, role, canPublish, isVideo, initialMicOn, initialCamOn, navigation, onPromoted, leavingRef,
 }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -388,12 +404,26 @@ const RoomInner = ({
 
   useEffect(() => {
     if (!room) return undefined;
-    const onData = (payload) => {
+    const hostIdentity = `u${broadcast.host?.id}`;
+    // The sender is the participant LiveKit says sent it — never the name or
+    // "host" flag inside the message, which any viewer could write.
+    const onData = (payload, sender) => {
       const msg = decodeData(payload);
-      if (!msg) return;
-      if (msg.t === 'chat') pushMessage({ id: msg.id, name: msg.name, text: msg.text, host: !!msg.host });
-      else if (msg.t === 'react') { reactionsRef.current?.add(msg.emoji || '❤️'); setLikeCount((c) => c + 1); }
+      if (!msg || !sender) return;
+      if (msg.t === 'chat') {
+        const text = String(msg.text || '').trim().slice(0, CHAT_MAX);
+        if (!text) return;
+        pushMessage({
+          id: `${sender.identity}-${String(msg.id || Date.now()).slice(0, 40)}`,
+          name: sender.name || sender.identity,
+          text,
+          host: sender.identity === hostIdentity,
+        });
+      } else if (msg.t === 'react') { reactionsRef.current?.add('❤️'); setLikeCount((c) => c + 1); }
       else if (msg.t === 'graphic') {
+        // On-screen text only from those on stage: a viewer could otherwise
+        // write over the broadcast for everyone.
+        if (!isPublisher(sender)) return;
         const g = msg.visible
           ? { style: msg.style, title: msg.title, sub: msg.sub, x: msg.x ?? null, y: msg.y ?? null }
           : null;
@@ -403,7 +433,7 @@ const RoomInner = ({
     };
     room.on(RoomEvent.DataReceived, onData);
     return () => { room.off(RoomEvent.DataReceived, onData); };
-  }, [room, pushMessage]);
+  }, [room, pushMessage, broadcast.host?.id]);
 
   // Host/co-host: publish (or clear) the on-screen graphic to everyone.
   const publishGraphic = useCallback((g) => {
@@ -435,8 +465,13 @@ const RoomInner = ({
     return () => { room.off(RoomEvent.ParticipantConnected, onJoin); };
   }, [room, canPublish]);
 
-  const sendChat = useCallback((text) => {
-    const m = { v: 1, t: 'chat', id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: myName, text, host: isHost };
+  const lastChatRef = useRef(0);
+  const sendChat = useCallback((raw) => {
+    const text = String(raw || '').trim().slice(0, CHAT_MAX);
+    const now = Date.now();
+    if (!text || now - lastChatRef.current < CHAT_GAP_MS) return;
+    lastChatRef.current = now;
+    const m = { v: 1, t: 'chat', id: `${now}-${Math.random().toString(36).slice(2, 7)}`, name: myName, text, host: isHost };
     pushMessage({ id: m.id, name: m.name, text: m.text, host: m.host });
     setDraft('');
     try { room?.localParticipant?.publishData(encodeData(m), { reliable: true }); } catch {}
@@ -471,9 +506,19 @@ const RoomInner = ({
           clearInterval(pollRef.current); pollRef.current = null;
           onPromoted(res.token);
         }
-      } catch { /* not approved yet (403) — keep waiting */ }
+      } catch (e) {
+        // 'pending' (or no answer, offline): keep waiting. Any other answer
+        // ends the asking — before, a declined viewer asked every 4 s until
+        // they left.
+        const code = e?.response?.data?.code;
+        if (code && code !== 'pending') {
+          clearInterval(pollRef.current); pollRef.current = null;
+          setRequested(false);
+          if (code === 'rejected') Alert.alert(t('live.title'), t('live.requestDeclined'));
+        }
+      }
     }, 4000);
-  }, [broadcast.id, onPromoted]);
+  }, [broadcast.id, onPromoted, t]);
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   // When we become a co-host, the room reconnects publishing — reflect that in
@@ -533,16 +578,38 @@ const RoomInner = ({
     }
   };
 
-  const leave = () => { try { room?.disconnect(); } catch {} };
+  const leave = () => {
+    if (leavingRef) leavingRef.current = true;
+    try { room?.disconnect(); } catch {}
+  };
   const endLive = () => {
     Alert.alert(t('live.endBroadcastTitle'), t('live.endBroadcastBody'), [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'End', style: 'destructive', onPress: async () => {
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('live.end'), style: 'destructive', onPress: async () => {
         try { await endBroadcast(broadcast.id); } catch {}
         leave();
       } },
     ]);
   };
+
+  // The host going back (Android's back button, a push opened) would leave
+  // the room live with nobody hosting until LiveKit noticed: ask, and end it.
+  useEffect(() => {
+    if (!isHost || !navigation?.addListener) return undefined;
+    return navigation.addListener('beforeRemove', (e) => {
+      if (leavingRef?.current) return;
+      e.preventDefault();
+      Alert.alert(t('live.leaveHostTitle'), t('live.leaveHostBody'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('live.end'), style: 'destructive', onPress: async () => {
+          try { await endBroadcast(broadcast.id); } catch {}
+          leave();
+          navigation.dispatch(e.data.action);
+        } },
+      ]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHost, navigation, broadcast.id, t]);
 
   const askToJoin = async () => {
     try { await requestCohost(broadcast.id); setRequested(true); startPromotionPoll(); }
@@ -554,7 +621,18 @@ const RoomInner = ({
   const reject = async (req) => {
     try { await rejectCohost(broadcast.id, req.id); setRequests((p) => p.filter((r) => r.id !== req.id)); } catch {}
   };
-  const kick = (identity) => moderateBroadcast(broadcast.id, identity?.replace(/^u/, ''));
+  // Asked first (a tap on a small x removed people by accident), and a
+  // failure is said, not left as an unhandled promise.
+  const kick = (identity) => {
+    const who = participants.find((p) => p.identity === identity);
+    Alert.alert(t('live.removeTitle', { name: who?.name || identity }), t('live.removeBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('live.remove'), style: 'destructive', onPress: () => {
+        moderateBroadcast(broadcast.id, String(identity || '').replace(/^u/, ''))
+          .catch(() => Alert.alert(t('live.title'), t('live.removeFailed')));
+      } },
+    ]);
+  };
 
   const connecting = publishers.length === 0;
 
@@ -588,7 +666,7 @@ const RoomInner = ({
         <TouchableOpacity style={styles.endPillWrap} onPress={endLive} activeOpacity={0.85} hitSlop={6}>
           <LinearGradient colors={live.gradEnd} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.endPill}>
             <Ionicons name="stop" size={11} color="#fff" />
-            <Text style={styles.endPillText}>End</Text>
+            <Text style={styles.endPillText}>{t('live.end')}</Text>
           </LinearGradient>
         </TouchableOpacity>
       )}
@@ -679,8 +757,8 @@ const RoomInner = ({
           </View>
           <Text style={styles.speakerName} numberOfLines={1}>{p.name || p.identity}</Text>
           {isHost && p.identity !== localParticipant?.identity && (
-            <TouchableOpacity onPress={() => kick(p.identity)}>
-              <Text style={styles.removeText}>remove</Text>
+            <TouchableOpacity onPress={() => kick(p.identity)} hitSlop={10} accessibilityRole="button">
+              <Text style={styles.removeText}>{t('live.remove')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -690,7 +768,7 @@ const RoomInner = ({
 
   const controlsNode = (
     <View style={[styles.controls, landscape && styles.controlsLandscape]}>
-      <TouchableOpacity style={styles.ctrlBtn} onPress={sendReaction}>
+      <TouchableOpacity style={styles.ctrlBtn} onPress={sendReaction} accessibilityRole="button" testID="live-heart">
         <Ionicons name="heart" size={22} color={live.live} />
       </TouchableOpacity>
       {canPublish ? (
@@ -725,7 +803,7 @@ const RoomInner = ({
             disabled={requested}
           >
             <MaterialCommunityIcons name="hand-back-right-outline" size={20} color="#fff" />
-            <Text style={styles.ctrlText}>{requested ? 'Requested…' : 'Request to join'}</Text>
+            <Text style={styles.ctrlText}>{requested ? t('live.requested') : t('live.requestToJoin')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd]} onPress={leave}>
             <Ionicons name="exit-outline" size={20} color="#fff" /><Text style={styles.ctrlText}>{t('live.leave')}</Text>
@@ -787,7 +865,7 @@ const RoomInner = ({
       >
         {headerNode}
         <Text style={styles.titleOverlay} numberOfLines={2}>{broadcast.title}</Text>
-        <Text style={styles.kindOverlay}>{KIND_LABEL[broadcast.kind] || (broadcast.kind || 'meet').toUpperCase()}</Text>
+        <Text style={styles.kindOverlay}>{t(KIND_KEY[broadcast.kind] || 'live.kindMeet').toUpperCase()}</Text>
         {hostRowNode}
       </LinearGradient>
 
@@ -902,7 +980,8 @@ const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick 
         <Text style={styles.videoName} numberOfLines={1}>{participant.name || participant.identity}</Text>
       </View>
       {showKick && (
-        <TouchableOpacity style={styles.videoKick} onPress={() => onKick(participant.identity)}>
+        <TouchableOpacity style={styles.videoKick} onPress={() => onKick(participant.identity)} hitSlop={12}
+          accessibilityRole="button">
           <Ionicons name="close" size={14} color="#fff" />
         </TouchableOpacity>
       )}

@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { live } from '../../constants/liveTheme';
 import { useI18n } from '../../context/I18nContext';
 import useKeyboardHeight from '../../hooks/useKeyboardHeight';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Module scope can't call t(), so each style carries a key the render site
 // resolves — the same pattern the feed's FEED_REASON map uses.
@@ -25,6 +26,7 @@ const STYLES = [
 export default function GraphicComposer({ visible, current, onShow, onClear, onClose }) {
   const { t } = useI18n();
   const kbHeight = useKeyboardHeight();
+  const insets = useSafeAreaInsets();
   const [styleKey, setStyleKey] = useState('lower3');
   const [title, setTitle] = useState('');
   const [sub, setSub] = useState('');
@@ -48,7 +50,7 @@ export default function GraphicComposer({ visible, current, onShow, onClear, onC
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={[styles.sheet, kbHeight > 0 ? { marginBottom: kbHeight } : null]}>
+        <TouchableOpacity activeOpacity={1} style={[styles.sheet, kbHeight > 0 ? { marginBottom: kbHeight } : { paddingBottom: 20 + Math.max(insets.bottom, 14) }]}>
           <View style={styles.handle} />
           <Text style={styles.title}>{t('live.graphic.title')}</Text>
 

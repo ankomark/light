@@ -278,6 +278,9 @@ REST_FRAMEWORK = {
         # Live broadcasting abuse guards.
         'go_live': '20/hour',
         'cohost_request': '30/hour',
+        # Likes are flushed every 5 s; on-screen text is set by hand.
+        'live_react': '30/min',
+        'live_action': '30/min',
         # Group chat abuse guards: message spam, reaction spam, and mass
         # join-request spam. Generous enough for fast human chatting.
         'group_post': '90/min',

@@ -1946,6 +1946,10 @@ const apiLog = (message, data = null, level = 'log') => {
 // ── Live broadcasting (LiveKit) ──────────────────────────────────────────────
 export const createBroadcast = (kind, title) =>
   apiRequest('post', '/live/broadcasts/', { kind, title });
+// Followers held and needed per kind: the Go Live screen says what is
+// missing before anyone sets up a broadcast.
+export const fetchLiveEligibility = () =>
+  apiRequest('get', '/live/broadcasts/eligibility/');
 export const fetchBroadcasts = () =>
   apiRequest('get', '/live/broadcasts/');
 export const fetchBroadcastToken = (id) =>

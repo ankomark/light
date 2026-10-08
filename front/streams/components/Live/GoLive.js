@@ -1,21 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert,
+  View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert, Keyboard,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
 import { mediaDevices, RTCView } from '@livekit/react-native-webrtc';
-import { createBroadcast } from '../../services/api';
+import { createBroadcast, fetchLiveEligibility } from '../../services/api';
 import { typography, spacing, radius } from '../../constants/theme';
 import { live, goldGlow } from '../../constants/liveTheme';
 import { useI18n } from '../../context/I18nContext';
 
 // Module scope can't call t(); the hint key is resolved at render.
 const KINDS = [
-  { key: 'meet', label: 'Meet', icon: 'account-group', hintKey: 'live.kind.meetHint' },
-  { key: 'tv', label: 'Go-Live', icon: 'television-classic', hintKey: 'live.kind.tvHint' },
+  { key: 'meet', labelKey: 'live.kindMeet', icon: 'account-group', hintKey: 'live.kind.meetHint' },
+  { key: 'tv', labelKey: 'live.kindTv', icon: 'television-classic', hintKey: 'live.kind.tvHint' },
 ];
 
 // Champagne-gold gradient action button used across the setup + lobby steps.
@@ -32,10 +32,32 @@ const GoLive = ({ navigation, route }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const [stage, setStage] = useState('setup'); // setup | lobby
-  const [kind, setKind] = useState(route.params?.kind || 'meet');
+  const [kind, setKind] = useState(route?.params?.kind || 'meet');
   // A title can come with the screen (a book club's reading room, say).
-  const [title, setTitle] = useState(route.params?.title || '');
+  const [title, setTitle] = useState(route?.params?.title || '');
   const [busy, setBusy] = useState(false);
+  // Followers held and needed: what is missing is said up front, not after
+  // the camera test. Unknown (offline, an old server) = let them try.
+  const [eligibility, setEligibility] = useState(null);
+  // Bumped to take the camera again after a failed start (it was released
+  // for LiveKit, and the preview stayed black).
+  const [previewKey, setPreviewKey] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    fetchLiveEligibility().then((e) => { if (alive) setEligibility(e); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const shortBy = (k) => {
+    if (!eligibility?.allowed || eligibility.allowed[k] !== false) return null;
+    return t('live.followersNeeded', {
+      n: (eligibility.needed?.[k] ?? 0).toLocaleString(),
+      kind: t(k === 'tv' ? 'live.kindTv' : 'live.kindMeet'),
+      have: (eligibility.followers ?? 0).toLocaleString(),
+    });
+  };
+  const blockedReason = shortBy(kind);
 
   // Lobby (pre-join) state
   const [micOn, setMicOn] = useState(true);
@@ -71,7 +93,7 @@ const GoLive = ({ navigation, route }) => {
       }
     })();
     return () => { cancelled = true; stopPreview(); };
-  }, [stage, isVideo, inExpoGo, stopPreview, t]);
+  }, [stage, isVideo, inExpoGo, stopPreview, t, previewKey]);
 
   const toggleMicPreview = () => {
     const next = !micOn;
@@ -92,7 +114,9 @@ const GoLive = ({ navigation, route }) => {
   };
 
   const goToLobby = () => {
+    Keyboard.dismiss();
     if (title.trim().length < 3) { Alert.alert(t('live.goLive'), t('live.titleRequired')); return; }
+    if (blockedReason) { Alert.alert(t('live.goLive'), blockedReason); return; }
     setMicOn(true);
     setCamOn(isVideo);
     setStage('lobby');
@@ -109,8 +133,16 @@ const GoLive = ({ navigation, route }) => {
         initialMicOn: micOn, initialCamOn: camOn,
       });
     } catch (e) {
-      Alert.alert(t('live.goLive'), e?.response?.data?.error || t('live.startFailed'));
+      const d = e?.response?.data;
+      Alert.alert(t('live.goLive'), d?.code === 'followers_needed'
+        ? t('live.followersNeeded', {
+          n: Number(d.needed || 0).toLocaleString(),
+          kind: t(kind === 'tv' ? 'live.kindTv' : 'live.kindMeet'),
+          have: (eligibility?.followers ?? 0).toLocaleString(),
+        })
+        : t('live.startFailed'));
       setBusy(false);
+      setPreviewKey((k) => k + 1);   // the camera back in the preview
     }
   };
 
@@ -119,7 +151,8 @@ const GoLive = ({ navigation, route }) => {
     return (
       <View style={[styles.root, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.md }]}>
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={() => setStage('setup')} hitSlop={10}>
+          <TouchableOpacity onPress={() => setStage('setup')} hitSlop={10} accessibilityRole="button"
+            accessibilityLabel={t('common.goBack')}>
             <Ionicons name="chevron-back" size={26} color={live.ink} />
           </TouchableOpacity>
           <Text style={styles.topTitle}>{t('live.ready')}</Text>
@@ -138,7 +171,7 @@ const GoLive = ({ navigation, route }) => {
           ) : (
             <View style={styles.previewPlaceholder}>
               <MaterialCommunityIcons name={isVideo ? 'video-off' : 'account-group'} size={56} color={live.inkDim} />
-              <Text style={styles.previewHint}>{isVideo ? 'Camera off' : 'Audio broadcast'}</Text>
+              <Text style={styles.previewHint}>{isVideo ? t('live.cameraOff') : t('live.audioOnly')}</Text>
             </View>
           )}
           <View style={styles.previewBadge}>
@@ -149,12 +182,12 @@ const GoLive = ({ navigation, route }) => {
         <View style={styles.lobbyControls}>
           <TouchableOpacity style={[styles.lobbyBtn, !micOn && styles.lobbyBtnOff]} onPress={toggleMicPreview}>
             <MaterialCommunityIcons name={micOn ? 'microphone' : 'microphone-off'} size={24} color="#fff" />
-            <Text style={styles.lobbyBtnText}>{micOn ? 'Mic on' : 'Mic off'}</Text>
+            <Text style={styles.lobbyBtnText}>{micOn ? t('live.micOn') : t('live.micOff')}</Text>
           </TouchableOpacity>
           {isVideo && (
             <TouchableOpacity style={[styles.lobbyBtn, !camOn && styles.lobbyBtnOff]} onPress={toggleCamPreview}>
               <MaterialCommunityIcons name={camOn ? 'video' : 'video-off'} size={24} color="#fff" />
-              <Text style={styles.lobbyBtnText}>{camOn ? 'Cam on' : 'Cam off'}</Text>
+              <Text style={styles.lobbyBtnText}>{camOn ? t('live.camOn') : t('live.camOff')}</Text>
             </TouchableOpacity>
           )}
           {isVideo && camOn && (
@@ -180,9 +213,10 @@ const GoLive = ({ navigation, route }) => {
 
   // ── Setup (kind + title) ───────────────────────────────────────────────────
   return (
-    <View style={[styles.root, { paddingTop: insets.top + spacing.sm }]}>
+    <View style={[styles.root, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.md }]}>
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10}>
+        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} accessibilityRole="button"
+          accessibilityLabel={t('common.goBack')}>
           <Ionicons name="chevron-back" size={26} color={live.ink} />
         </TouchableOpacity>
         <Text style={styles.topTitle}>{t('live.goLive')}</Text>
@@ -195,9 +229,10 @@ const GoLive = ({ navigation, route }) => {
           const active = kind === k.key;
           return (
             <TouchableOpacity key={k.key} style={[styles.kindCard, active && styles.kindCardActive]}
-              onPress={() => setKind(k.key)} activeOpacity={0.85}>
+              onPress={() => setKind(k.key)} activeOpacity={0.85} accessibilityRole="button"
+              accessibilityState={{ selected: active }} testID={`golive-kind-${k.key}`}>
               <MaterialCommunityIcons name={k.icon} size={26} color={active ? live.onGold : live.gold} />
-              <Text style={[styles.kindLabel, active && styles.kindLabelActive]}>{k.label}</Text>
+              <Text style={[styles.kindLabel, active && styles.kindLabelActive]}>{t(k.labelKey)}</Text>
               <Text style={[styles.kindHint, active && { color: live.onGold }]}>{t(k.hintKey)}</Text>
             </TouchableOpacity>
           );
@@ -212,13 +247,16 @@ const GoLive = ({ navigation, route }) => {
         value={title}
         onChangeText={setTitle}
         maxLength={200}
+        returnKeyType="next"
+        onSubmitEditing={goToLobby}
       />
+      {!!blockedReason && <Text style={styles.blocked} testID="golive-blocked">{blockedReason}</Text>}
 
       <GoldButton onPress={goToLobby}>
         <Ionicons name="arrow-forward" size={20} color={live.onGold} />
         <Text style={styles.goBtnText}>{t('common.continue')}</Text>
       </GoldButton>
-      <Text style={styles.note}>Next you’ll preview your {isVideo ? 'camera and mic' : 'mic'} before going live.</Text>
+      <Text style={styles.note}>{t(isVideo ? 'live.previewNextVideo' : 'live.previewNextAudio')}</Text>
     </View>
   );
 };
@@ -276,6 +314,7 @@ const styles = StyleSheet.create({
   },
   goBtnText: { ...typography.button, color: live.onGold, fontWeight: '800' },
   note: { ...typography.caption, color: live.inkMute, textAlign: 'center', marginTop: spacing.md },
+  blocked: { ...typography.caption, color: '#FFD9A0', marginTop: spacing.sm },
 });
 
 export default GoLive;

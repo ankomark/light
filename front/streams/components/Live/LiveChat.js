@@ -14,10 +14,10 @@ import { spacing, radius } from '../../constants/theme';
 import { live } from '../../constants/liveTheme';
 import { useI18n } from '../../context/I18nContext';
 
-const ChatRow = ({ item }) => (
+const ChatRow = ({ item, hostLabel }) => (
   <View style={styles.row}>
     {item.host
-      ? <Text style={styles.hostBadge}>HOST</Text>
+      ? <Text style={styles.hostBadge}>{hostLabel}</Text>
       : <Text style={styles.name} numberOfLines={1}>{item.name}</Text>}
     <Text style={styles.text}>{item.text}</Text>
   </View>
@@ -46,7 +46,7 @@ const LiveChat = ({ messages, draft, onChangeDraft, onSend, style }) => {
         ref={listRef}
         data={messages}
         keyExtractor={(m) => String(m.id)}
-        renderItem={ChatRow}
+        renderItem={({ item }) => <ChatRow item={item} hostLabel={t('live.hostBadge')} />}
         showsVerticalScrollIndicator={false}
         style={styles.list}
         contentContainerStyle={styles.listContent}

@@ -33,7 +33,7 @@ class LiveBroadcastTests(APITestCase):
 
     def _go_live(self):
         self.client.force_authenticate(self.host)
-        with mock.patch('songs.views.live.notify_user') as notify:
+        with mock.patch('songs.push.notify_many') as notify:
             res = self.client.post('/api/live/broadcasts/', {'kind': 'meet', 'title': 'Devotion'}, format='json')
         return res, notify
 
@@ -49,7 +49,7 @@ class LiveBroadcastTests(APITestCase):
         self.assertEqual(g['room'], LiveBroadcast.objects.get().room_name)
         # the one follower was notified
         self.assertEqual(notify.call_count, 1)
-        self.assertEqual(notify.call_args[0][0], self.fan)
+        self.assertEqual(notify.call_args[0][0], [self.fan.id])   # one batched push
 
     def test_viewer_token_is_subscribe_only(self):
         res, _ = self._go_live()

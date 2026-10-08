@@ -350,6 +350,9 @@ const App = () => {
           postId: data.postId,
           ...(data.commentId ? { commentId: data.commentId, shouldOpenComments: true } : {}),
         });
+      } else if ((data?.type === 'live' || data?.type === 'cohost_approved') && data.broadcast_id) {
+        // Someone I follow is live (or the host let me on stage): into it.
+        navigate('LiveHub', { openBroadcast: data.broadcast_id });
       } else if (data?.type === 'admin_reply') {
         // The admins answered my note: my notes, on the board.
         navigate('NoticeBoard', { openMyNotes: true });
@@ -1148,11 +1151,11 @@ const AdminReportsWrapper = adminWrap(AdminReports);
 const AdminUsersWrapper = adminWrap(AdminUsers);
 const AdminContentWrapper = adminWrap(AdminContent);
 const AdminLogsWrapper = adminWrap(AdminLogs);
-const LiveHubWrapper = ({ navigation }) => (
+const LiveHubWrapper = ({ navigation, route }) => (
   <View style={{ flex: 1, backgroundColor: '#060D1A' }}>
     <RotatingBackground intervalMs={60000} scrimColor="rgba(6,13,26,0.72)" />
     <Header navigation={navigation} transparentBg />
-    <LiveHub navigation={navigation} />
+    <LiveHub navigation={navigation} route={route} />
   </View>
 );
 

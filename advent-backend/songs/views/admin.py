@@ -292,8 +292,15 @@ def _close_groups(ids):
 
 
 def _end_live(ids):
-    """A live broadcast taken down ends now: nobody can join or keep watching."""
+    """A live broadcast taken down ends now: nobody can join or keep watching.
+    The room is closed at LiveKit too - marking it ended alone left everyone
+    already in it watching."""
+    from .. import livekit_service as lk
+    from ..tasks import run_in_background
+    rooms = list(LiveBroadcast.objects.filter(pk__in=ids, status='live').values_list('room_name', flat=True))
     LiveBroadcast.objects.filter(pk__in=ids, status='live').update(status='ended', ended_at=timezone.now())
+    for room in rooms:
+        run_in_background(lk.end_room, room)
 
 
 def _paginated(view, qs, serializer_cls):

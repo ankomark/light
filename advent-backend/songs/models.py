@@ -3016,6 +3016,8 @@ class CoHostRequest(models.Model):
         ('approved', 'Approved'),
         ('rejected', 'Rejected'),
         ('left', 'Left'),
+        # Removed by the host or an admin: no new join token this broadcast.
+        ('removed', 'Removed'),
     ]
     broadcast = models.ForeignKey(LiveBroadcast, on_delete=models.CASCADE, related_name='cohost_requests')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cohost_requests')
