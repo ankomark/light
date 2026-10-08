@@ -21,7 +21,7 @@ export const SECTIONS = [
   { key: 'groups', icon: 'account-group-outline',
     routes: ['Groups', 'Communities', 'GroupDetail', 'CreateGroup', 'GroupMembers', 'GroupJoinRequests', 'GroupMedia',
       'GroupAuditLog', 'GroupAddMembers'] },
-  { key: 'live', icon: 'broadcast', routes: ['LiveHub', 'GoLive', 'LiveRoom'] },
+  { key: 'live', icon: 'broadcast', routes: ['LiveHub', 'GoLive', 'LiveRoom', 'LiveSummary'] },
   { key: 'bible', icon: 'book-cross', routes: ['bible', 'BibleLibrary'] },
   { key: 'verse', icon: 'book-open-variant', routes: ['DailyVerse'] },
   { key: 'sabbath_school', icon: 'book-education-outline', routes: ['SabbathSchool', 'SabbathSchoolLesson'] },

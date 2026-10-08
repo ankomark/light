@@ -20,7 +20,7 @@ TOKEN_TTL = timedelta(hours=4)
 PUBLISH_SOURCES = ('camera', 'microphone')
 
 
-def create_access_token(*, identity, name, room, can_publish):
+def create_access_token(*, identity, name, room, can_publish, can_publish_data=True):
     """Mint a LiveKit JWT. Viewers get subscribe-only; host/co-host can publish.
     Data publish is always allowed so chat/reactions/requests can ride the room's
     data channel."""
@@ -32,7 +32,8 @@ def create_access_token(*, identity, name, room, can_publish):
         # phone (notifications, messages) to everyone watching.
         can_publish_sources=list(PUBLISH_SOURCES) if can_publish else None,
         can_subscribe=True,
-        can_publish_data=True,
+        # Off for someone muted in chat: LiveKit itself drops their messages.
+        can_publish_data=bool(can_publish_data),
         # The name in chat is the one in this token (the username): nobody
         # may rename themselves "pastor" mid-broadcast.
         can_update_own_metadata=False,
@@ -103,6 +104,27 @@ def end_room(room_name):
         finally:
             await lk.aclose()
     _run(_go)
+
+
+def set_permissions(room_name, identity, *, can_publish, can_publish_data):
+    """What a connected participant may send, changed live (no reconnect):
+    on stage or not, and chat/reactions or not. The whole permission is
+    replaced, so both are always given."""
+    async def _go():
+        lk = api.LiveKitAPI(_http_url(), settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
+        try:
+            await lk.room.update_participant(api.UpdateParticipantRequest(
+                room=room_name,
+                identity=str(identity),
+                permission=api.ParticipantPermission(
+                    can_subscribe=True, can_publish=bool(can_publish), can_publish_data=bool(can_publish_data),
+                    can_publish_sources=(
+                        [api.TrackSource.CAMERA, api.TrackSource.MICROPHONE] if can_publish else []),
+                ),
+            ))
+        finally:
+            await lk.aclose()
+    return _run(_go)
 
 
 def grant_publish(room_name, identity):

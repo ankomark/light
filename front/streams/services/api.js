@@ -1078,6 +1078,8 @@ export const fetchServicesByUrl = async (nextUrl) => fetchPublicationsByUrl(next
 export const fetchServicesHome = async () => apiRequest('get', '/video-studios/home/');
 // A service's link to share (a rich card that opens it in the app).
 export const serviceShareUrl = (id) => `${PUBLIC_BASE}/service/${id}/`;
+// A live broadcast's public page: opens the app straight into the room.
+export const liveShareUrl = (id) => `${PUBLIC_BASE}/live/${id}/`;
 
 // A service's reviews: { summary, mine, can_review, is_owner, results, next }.
 export const fetchServiceReviews = async (id, page = 1) => apiRequest('get', `/video-studios/${id}/reviews/`, null, { params: { page } });
@@ -1978,6 +1980,13 @@ export const rejectCohost = (id, requestId) =>
   apiRequest('post', `/live/broadcasts/${id}/reject-cohost/`, { request_id: requestId });
 export const fetchCohostToken = (id) =>
   apiRequest('get', `/live/broadcasts/${id}/cohost-token/`);
+// Host / co-host chat tools: pin a comment above the chat, mute someone in it.
+export const pinBroadcastComment = (id, userId, text) =>
+  apiRequest('post', `/live/broadcasts/${id}/pin/`, { user_id: userId, text });
+export const unpinBroadcastComment = (id) =>
+  apiRequest('post', `/live/broadcasts/${id}/pin/`, { clear: true });
+export const muteBroadcastChat = (id, userId, mute = true) =>
+  apiRequest('post', `/live/broadcasts/${id}/mute-chat/`, { user_id: userId, mute });
 export const moderateBroadcast = (id, userId) =>
   apiRequest('post', `/live/broadcasts/${id}/moderate/`, { user_id: userId });
 

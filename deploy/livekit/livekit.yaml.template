@@ -20,6 +20,14 @@ rtc:
   # ICE candidates and nobody outside can connect.
   use_external_ip: true
   enable_loopback_candidate: false
+  # Real time over weak mobile data: the server watches each viewer's
+  # bandwidth and drops them to a smaller video copy (the app sends 720p,
+  # 360p and 180p) before anything queues up. If even 180p cannot get through
+  # it pauses that viewer's video and keeps the audio flowing - a frozen
+  # picture with live sound beats sound arriving seconds late.
+  congestion_control:
+    enabled: true
+    allow_pause: true
 
 # Local only (bound to 127.0.0.1 in redis.conf). One node does not strictly
 # need it; it is here so a second live box can be added without a redesign.

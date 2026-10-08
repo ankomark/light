@@ -12,13 +12,17 @@ class LiveBroadcastSerializer(serializers.ModelSerializer):
     # 'following' | 'requested' | 'none' — lets the button show a pending request
     # (private host) rather than snapping back to Follow.
     follow_status = serializers.SerializerMethodField()
+    # Whether the requesting viewer is muted in this broadcast's chat (their
+    # composer says so instead of sending into the void).
+    chat_muted = serializers.SerializerMethodField()
 
     class Meta:
         model = LiveBroadcast
         fields = [
             'id', 'host', 'kind', 'title', 'status', 'viewer_count',
             'peak_viewer_count', 'duration_seconds', 'started_at', 'ended_at',
-            'like_count', 'overlay', 'is_following', 'follow_status',
+            'like_count', 'overlay', 'is_following', 'follow_status', 'pinned', 'chat_muted',
+            'singles_only',
         ]
         read_only_fields = fields
 
@@ -27,6 +31,12 @@ class LiveBroadcastSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated or request.user.id == obj.host_id:
             return False
         return obj.host.followers.filter(id=request.user.id).exists()
+
+    def get_chat_muted(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return request.user.id in (obj.muted_ids or [])
 
     def get_follow_status(self, obj):
         request = self.context.get('request')
@@ -46,7 +56,7 @@ class LiveBroadcastListSerializer(LiveBroadcastSerializer):
     class Meta(LiveBroadcastSerializer.Meta):
         fields = [
             f for f in LiveBroadcastSerializer.Meta.fields
-            if f not in ('is_following', 'follow_status', 'overlay')
+            if f not in ('is_following', 'follow_status', 'overlay', 'pinned', 'chat_muted')
         ]
         read_only_fields = fields
 

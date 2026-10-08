@@ -188,6 +188,7 @@ import MarketWarmup from './components/MarketWarmup';
 import LiveHub from './components/Live/LiveHub';
 import GoLive from './components/Live/GoLive';
 import LiveRoom from './components/Live/LiveRoom';
+import LiveSummary from './components/Live/LiveSummary';
 import { registerGlobals as registerLiveKitGlobals } from '@livekit/react-native';
 import { isAdmin } from './utils/roles';
 import InboxScreen from './components/InboxScreen';
@@ -272,6 +273,8 @@ const linking = {
       SellerShop: 'shop/:username',
       // A person's profile, shared: streams://u/mark (and https://<host>/u/mark/).
       UserProfile: 'u/:username',
+      // A live broadcast, shared: streams://live/12 (and https://<host>/live/12/).
+      LiveHub: 'live/:openBroadcast',
       // A product, shared: streams://product/hymnal-2.
       ProductDetail: 'product/:slug',
     },
@@ -630,6 +633,7 @@ const App = () => {
                 <Stack.Screen name="LiveHub" component={LiveHubWrapper} />
                 <Stack.Screen name="GoLive" component={GoLive} options={{ headerShown: false }} />
                 <Stack.Screen name="LiveRoom" component={LiveRoom} options={{ headerShown: false, gestureEnabled: false }} />
+                <Stack.Screen name="LiveSummary" component={LiveSummary} options={{ headerShown: false }} />
                 
                 
               

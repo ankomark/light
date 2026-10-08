@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
-  useWindowDimensions, AppState,
+  useWindowDimensions, AppState, Share,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,11 +22,12 @@ import {
   useTracks, VideoTrack,
 } from '@livekit/react-native';
 import {
-  Track, RoomEvent, ConnectionState, DisconnectReason, VideoPresets, setLogLevel,
+  Track, RoomEvent, ConnectionState, ConnectionQuality, DisconnectReason, VideoPresets, setLogLevel,
 } from 'livekit-client';
 import {
   endBroadcast, requestCohost, fetchCohostRequests, approveCohost, rejectCohost,
   fetchCohostToken, moderateBroadcast, followUser, reactBroadcast, setBroadcastOverlay,
+  pinBroadcastComment, unpinBroadcastComment, muteBroadcastChat, liveShareUrl,
 } from '../../services/api';
 import { typography, spacing, radius, shadows } from '../../constants/theme';
 import { live, goldGlow, redGlow, fmtCount } from '../../constants/liveTheme';
@@ -35,6 +36,8 @@ import LiveChat from './LiveChat';
 import FloatingReactions from './FloatingReactions';
 import LiveGraphic from './LiveGraphic';
 import GraphicComposer from './GraphicComposer';
+import ReactionTray, { REACTIONS } from './ReactionTray';
+import PeopleSheet from './PeopleSheet';
 import useKeyboardHeight from '../../hooks/useKeyboardHeight';
 import { useI18n } from '../../context/I18nContext';
 import ReportModal from '../ReportModal';
@@ -91,6 +94,13 @@ const KIND_KEY = { meet: 'live.kindMeet', tv: 'live.kindTv' };
 // instead of "Connecting..." for ever (server down, a network that blocks it).
 const CONNECT_TIMEOUT_MS = 20000;
 const AWAKE_TAG = 'live-room';
+// Recent chat a late joiner is given by the host (data messages never reach
+// people who were not there yet).
+const HISTORY_SIZE = 20;
+// "Mary joined" lines are gathered for this long: in a busy room one line
+// says "Mary and 12 others joined" instead of flooding the chat.
+const JOIN_BATCH_MS = 3000;
+const POOR = new Set([ConnectionQuality?.Poor ?? 'poor', ConnectionQuality?.Lost ?? 'lost']);
 
 // Video for the networks we serve: the host sends 720p plus 360p and 180p
 // copies (simulcast), and the server gives each viewer the one their
@@ -111,9 +121,10 @@ const ROOM_OPTIONS = {
 
 // A publishData that can fail without an unhandled promise rejection (it
 // rejects while reconnecting; try/catch alone only caught the sync throw).
-const sendData = (room, obj, reliable = true) => {
+const sendData = (room, obj, reliable = true, to = undefined) => {
   try {
-    Promise.resolve(room?.localParticipant?.publishData(encodeData(obj), { reliable })).catch(() => {});
+    const opts = to ? { reliable, destinationIdentities: to } : { reliable };
+    Promise.resolve(room?.localParticipant?.publishData(encodeData(obj), opts)).catch(() => {});
   } catch { /* not connected */ }
 };
 // Longest chat line drawn (the composer stops at 200 too; a hand-made
@@ -153,6 +164,8 @@ const LiveRoom = ({ navigation, route }) => {
   // Set once leaving is decided (or the room is gone), so the host's "leave
   // your broadcast?" question isn't asked on the way out.
   const leavingRef = useRef(false);
+  // Set by the host's End: the room closing goes to the summary, not back.
+  const summaryRef = useRef(null);
   const canPublish = role === 'host' || role === 'cohost';
   const isVideo = broadcast.kind === 'tv';
   // On promotion we swap to a publish token, which makes LiveKitRoom reconnect
@@ -249,6 +262,10 @@ const LiveRoom = ({ navigation, route }) => {
         // Leaving was my choice (Leave, End): nothing to explain.
         const chose = leavingRef.current;
         leavingRef.current = true;
+        if (summaryRef.current) {
+          navigation.replace('LiveSummary', { summary: summaryRef.current });
+          return;
+        }
         // Say why, unless I left myself: before, the screen just vanished.
         const why = reason === DisconnectReason.ROOM_DELETED ? 'live.ended'
           : reason === DisconnectReason.PARTICIPANT_REMOVED ? 'live.removedYou'
@@ -270,6 +287,7 @@ const LiveRoom = ({ navigation, route }) => {
         initialCamOn={isVideo && role === 'host' && initialCamOn !== false}
         navigation={navigation}
         leavingRef={leavingRef}
+        summaryRef={summaryRef}
         onRetry={retry}
         onPromoted={(next) => {
           if (next && next !== token) { promotingRef.current = true; setToken(next); }
@@ -282,6 +300,7 @@ const LiveRoom = ({ navigation, route }) => {
 
 const RoomInner = ({
   broadcast, role, canPublish, isVideo, initialMicOn, initialCamOn, navigation, onPromoted, leavingRef, onRetry,
+  summaryRef,
 }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -370,6 +389,20 @@ const RoomInner = ({
   const [draft, setDraft] = useState('');
   const reactionsRef = useRef(null);
   const pollRef = useRef(null);
+
+  // ── TikTok-style extras ────────────────────────────────────────────────────
+  const hostId = `u${hostUser.id}`;
+  const [pinned, setPinned] = useState(broadcast.pinned || null);
+  const [chatMuted, setChatMuted] = useState(!!broadcast.chat_muted);
+  const [trayOpen, setTrayOpen] = useState(false);
+  const [sheet, setSheet] = useState(null);           // { mode: 'list' } | { mode: 'person', person, message }
+  const [mutedIds, setMutedIds] = useState(() => new Set());   // who I muted this session
+  const [myQuality, setMyQuality] = useState(null);
+  const [hostQuality, setHostQuality] = useState(null);
+  const commentCountRef = useRef(0);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const historyGotRef = useRef(false);
 
   // ── derived roster ─────────────────────────────────────────────────────────
   const publishers = useMemo(() => participants.filter(isPublisher), [participants]);
@@ -499,13 +532,39 @@ const RoomInner = ({
       if (msg.t === 'chat') {
         const text = String(msg.text || '').trim().slice(0, CHAT_MAX);
         if (!text) return;
+        commentCountRef.current += 1;
         pushMessage({
           id: `${sender.identity}-${String(msg.id || Date.now()).slice(0, 40)}`,
           name: sender.name || sender.identity,
           text,
           host: sender.identity === hostIdentity,
+          uid: sender.identity,
         });
-      } else if (msg.t === 'react') { reactionsRef.current?.add('❤️'); heardLikesRef.current += 1; }
+      } else if (msg.t === 'react') {
+        // Only the reactions the app offers - never any text sent as one.
+        reactionsRef.current?.add(REACTIONS.includes(msg.emoji) ? msg.emoji : '❤️');
+        heardLikesRef.current += 1;
+      } else if (msg.t === 'pin') {
+        if (!isPublisher(sender)) return;
+        const pin = msg.pinned;
+        setPinned(pin && pin.text ? {
+          user_id: pin.user_id, name: String(pin.name || '').slice(0, 60), text: String(pin.text).slice(0, CHAT_MAX),
+        } : null);
+      } else if (msg.t === 'history') {
+        // Recent chat for me, a late joiner - only from the host, only once.
+        if (sender.identity !== hostIdentity || historyGotRef.current) return;
+        historyGotRef.current = true;
+        const items = (Array.isArray(msg.items) ? msg.items : []).slice(-HISTORY_SIZE)
+          .filter((it) => it && it.text && it.uid)
+          .map((it) => ({
+            id: `h-${String(it.id).slice(0, 60)}`,
+            name: String(it.name || it.uid).slice(0, 60),
+            text: String(it.text).slice(0, CHAT_MAX),
+            host: it.uid === hostIdentity,
+            uid: String(it.uid).slice(0, 20),
+          }));
+        if (items.length) setMessages((prev) => [...items, ...prev].slice(-60));
+      }
       else if (msg.t === 'graphic') {
         // On-screen text only from those on stage: a viewer could otherwise
         // write over the broadcast for everyone.
@@ -553,17 +612,127 @@ const RoomInner = ({
     if (!text || now - lastChatRef.current < CHAT_GAP_MS) return;
     lastChatRef.current = now;
     const m = { v: 1, t: 'chat', id: `${now}-${Math.random().toString(36).slice(2, 7)}`, name: myName, text, host: isHost };
-    pushMessage({ id: m.id, name: m.name, text: m.text, host: m.host });
+    commentCountRef.current += 1;
+    pushMessage({ id: m.id, name: m.name, text: m.text, host: m.host, uid: room?.localParticipant?.identity });
     setDraft('');
     sendData(room, m);
   }, [room, myName, pushMessage, isHost]);
 
-  const sendReaction = useCallback(() => {
-    reactionsRef.current?.add('❤️');
+  const sendReaction = useCallback((emoji = '❤️') => {
+    const e = REACTIONS.includes(emoji) ? emoji : '❤️';
+    reactionsRef.current?.add(e);
     setLikeCount((c) => c + 1);
     pendingLikesRef.current += 1;
-    sendData(room, { v: 1, t: 'react', emoji: '❤️' }, false);
+    sendData(room, { v: 1, t: 'react', emoji: e }, false);
   }, [room]);
+
+  // ── the host hands a late joiner the recent chat ───────────────────────────
+  useEffect(() => {
+    if (!room || !isHost) return undefined;
+    const onJoin = (p) => {
+      const items = messagesRef.current.filter((m) => !m.system && m.uid).slice(-HISTORY_SIZE)
+        .map((m) => ({ id: m.id, name: m.name, text: m.text, uid: m.uid }));
+      if (items.length && p?.identity) sendData(room, { v: 1, t: 'history', items }, true, [p.identity]);
+    };
+    room.on(RoomEvent.ParticipantConnected, onJoin);
+    return () => { room.off(RoomEvent.ParticipantConnected, onJoin); };
+  }, [room, isHost]);
+
+  // ── "Mary joined", gathered ────────────────────────────────────────────────
+  const joinQueueRef = useRef([]);
+  useEffect(() => {
+    if (!room) return undefined;
+    const onJoin = (p) => { if (p?.name || p?.identity) joinQueueRef.current.push(p.name || p.identity); };
+    room.on(RoomEvent.ParticipantConnected, onJoin);
+    const id = setInterval(() => {
+      const q = joinQueueRef.current;
+      if (!q.length) return;
+      joinQueueRef.current = [];
+      const text = q.length === 1 ? t('live.joined', { name: q[0] })
+        : t('live.joinedMany', { name: q[q.length - 1], n: q.length - 1 });
+      pushMessage({ id: `j-${Date.now()}`, system: true, text });
+    }, JOIN_BATCH_MS);
+    return () => { room.off(RoomEvent.ParticipantConnected, onJoin); clearInterval(id); };
+  }, [room, pushMessage, t]);
+
+  // ── muted / unmuted by the host, live: the composer follows ───────────────
+  useEffect(() => {
+    if (!room) return undefined;
+    const onPerms = (_prev, p) => {
+      const me = room.localParticipant;
+      if (p && me && p.identity !== me.identity) return;
+      const canData = me?.permissions?.canPublishData;
+      if (typeof canData === 'boolean') setChatMuted(!canData);
+    };
+    room.on(RoomEvent.ParticipantPermissionsChanged, onPerms);
+    return () => { room.off(RoomEvent.ParticipantPermissionsChanged, onPerms); };
+  }, [room]);
+
+  // ── connection quality: say when the network, not the app, is the lag ────
+  useEffect(() => {
+    if (!room) return undefined;
+    const onQuality = (quality, p) => {
+      if (!p) return;
+      if (p.identity === room.localParticipant?.identity) setMyQuality(quality);
+      else if (p.identity === hostId) setHostQuality(quality);
+    };
+    room.on(RoomEvent.ConnectionQualityChanged, onQuality);
+    return () => { room.off(RoomEvent.ConnectionQualityChanged, onQuality); };
+  }, [room, hostId]);
+  const weakNote = POOR.has(myQuality) ? t('live.weakMine')
+    : (!isHost && POOR.has(hostQuality)) ? t('live.weakHost') : null;
+
+  // ── a person: their profile; for the host / co-hosts pin, mute, remove ────
+  const userIdOf = (identity) => Number(String(identity || '').replace(/^u/, '')) || null;
+  const openPerson = useCallback((item) => {
+    if (!item?.uid) return;
+    setSheet({
+      mode: 'person',
+      person: { identity: item.uid, name: item.name, host: item.uid === hostId },
+      message: item.system ? null : item,
+    });
+  }, [hostId]);
+  const failed = () => Alert.alert(t('live.title'), t('live.actionFailed'));
+  const doProfile = () => {
+    const who = sheet?.person;
+    setSheet(null);
+    if (who) navigation.navigate('UserProfile', { userId: userIdOf(who.identity), username: who.name });
+  };
+  const doPin = async () => {
+    const s = sheet;
+    setSheet(null);
+    try {
+      const r = await pinBroadcastComment(broadcast.id, userIdOf(s.person.identity), s.message.text);
+      setPinned(r?.pinned || null);
+      sendData(room, { v: 1, t: 'pin', pinned: r?.pinned || null });
+    } catch { failed(); }
+  };
+  const doUnpin = async () => {
+    try {
+      await unpinBroadcastComment(broadcast.id);
+      setPinned(null);
+      sendData(room, { v: 1, t: 'pin', pinned: null });
+    } catch { failed(); }
+  };
+  const doMute = async () => {
+    const who = sheet?.person;
+    setSheet(null);
+    if (!who) return;
+    const mute = !mutedIds.has(who.identity);
+    try {
+      await muteBroadcastChat(broadcast.id, userIdOf(who.identity), mute);
+      setMutedIds((prev) => {
+        const next = new Set(prev);
+        if (mute) next.add(who.identity); else next.delete(who.identity);
+        return next;
+      });
+    } catch { failed(); }
+  };
+  const share = () => {
+    Share.share({ message: `${t('live.shareText', { title: broadcast.title })}\n${liveShareUrl(broadcast.id)}` })
+      .catch(() => {});
+  };
+
 
   // ── host: poll co-host request inbox ─────────────────────────────────────--
   useEffect(() => {
@@ -697,7 +866,10 @@ const RoomInner = ({
       { text: t('common.cancel'), style: 'cancel' },
       { text: t('live.end'), style: 'destructive', onPress: async () => {
         if (leavingRef) leavingRef.current = true;   // the room closing is my doing
-        try { await endBroadcast(broadcast.id); } catch {}
+        try {
+          const ended = await endBroadcast(broadcast.id);
+          if (summaryRef && ended) summaryRef.current = { ...ended, comments: commentCountRef.current };
+        } catch { /* no summary: just back */ }
         leave();
       } },
     ]);
@@ -798,7 +970,16 @@ const RoomInner = ({
           <Ionicons name="heart" size={12} color={live.live} />
           <Text style={styles.heartPillText}>{fmtCount(likeCount)}</Text>
         </View>
-        <ViewPill count={watching} />
+        <TouchableOpacity onPress={() => setSheet({ mode: 'list' })} hitSlop={6} accessibilityRole="button"
+          accessibilityLabel={t('live.people')} testID="live-people">
+          <ViewPill count={watching} />
+        </TouchableOpacity>
+        {!broadcast.singles_only && (
+          <TouchableOpacity style={styles.closeBtn} onPress={share} hitSlop={8} accessibilityRole="button"
+            accessibilityLabel={t('live.share')} testID="live-share">
+            <Ionicons name="share-social-outline" size={17} color={live.ink} />
+          </TouchableOpacity>
+        )}
         {!isHost && (
           <TouchableOpacity style={styles.closeBtn} onPress={leave} hitSlop={10}>
             <Ionicons name="close" size={20} color={live.ink} />
@@ -908,7 +1089,8 @@ const RoomInner = ({
 
   const controlsNode = (
     <View style={[styles.controls, landscape && styles.controlsLandscape]}>
-      <TouchableOpacity style={styles.ctrlBtn} onPress={sendReaction} accessibilityRole="button" testID="live-heart">
+      <TouchableOpacity style={styles.ctrlBtn} onPress={() => sendReaction('❤️')} onLongPress={() => setTrayOpen(true)}
+        delayLongPress={250} accessibilityRole="button" accessibilityHint={t('live.reactMore')} testID="live-heart">
         <Ionicons name="heart" size={22} color={live.live} />
       </TouchableOpacity>
       {canPublish ? (
@@ -953,6 +1135,50 @@ const RoomInner = ({
     </View>
   );
 
+  const chatExtras = {
+    pinned,
+    onUnpin: canPublish ? doUnpin : undefined,
+    onPressMessage: openPerson,
+    muted: chatMuted,
+  };
+  const people = participants
+    .map((p) => ({
+      identity: p.identity, name: p.name || p.identity, host: p.identity === hostId,
+      onStage: p.identity !== hostId && isPublisher(p),
+    }))
+    .sort((a, b) => (b.host - a.host) || (b.onStage - a.onStage) || a.name.localeCompare(b.name));
+  const extrasNode = (
+    <>
+      {!!weakNote && (
+        <View style={[styles.weak, { top: insets.top + 64 }]} pointerEvents="none" testID="live-weak">
+          <MaterialCommunityIcons name="signal-cellular-1" size={14} color="#FFD9A0" />
+          <Text style={styles.weakText}>{weakNote}</Text>
+        </View>
+      )}
+      <ReactionTray
+        visible={trayOpen}
+        bottom={(landscape ? insets.bottom + 72 : (dockH || 150) + spacing.sm)}
+        onPick={(e) => sendReaction(e)}
+        onClose={() => setTrayOpen(false)}
+      />
+      <PeopleSheet
+        visible={!!sheet}
+        mode={sheet?.mode}
+        people={people}
+        person={sheet?.person}
+        message={sheet?.message}
+        canModerate={canPublish}
+        isMuted={!!sheet?.person && mutedIds.has(sheet.person.identity)}
+        onPick={(p) => setSheet({ mode: 'person', person: p, message: null })}
+        onClose={() => setSheet(null)}
+        onProfile={doProfile}
+        onPin={doPin}
+        onMute={doMute}
+        onRemove={() => { const who = sheet?.person; setSheet(null); if (who) kick(who.identity); }}
+      />
+    </>
+  );
+
   // ── Landscape: video fills the left, a chat/controls panel on the right ──────
   if (landscape) {
     return (
@@ -974,11 +1200,13 @@ const RoomInner = ({
         <View style={[styles.sidePanel, { marginBottom: kbHeight }]}>
           {inboxNode}
           <View style={[styles.bottomRow, styles.bottomRowLandscape]}>
-            <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat} />
+            <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat}
+              {...chatExtras} />
             <FloatingReactions ref={reactionsRef} />
           </View>
           {controlsNode}
         </View>
+        {extrasNode}
         {canPublish && (
           <GraphicComposer
             visible={graphicOpen}
@@ -1031,11 +1259,14 @@ const RoomInner = ({
           <View style={styles.dockTint} pointerEvents="none" />
           <View style={[styles.dockInner, { paddingBottom: kbHeight > 0 ? spacing.sm : insets.bottom + spacing.sm }]}>
             {inboxNode}
-            <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chatFull} />
+            <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chatFull}
+              {...chatExtras} />
             {controlsNode}
           </View>
         </BlurView>
       </View>
+
+      {extrasNode}
 
       {canPublish && (
         <GraphicComposer
@@ -1219,6 +1450,11 @@ const styles = StyleSheet.create({
   speakerWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   connecting: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   connectingText: { ...typography.body, color: live.inkDim },
+  weak: {
+    position: 'absolute', alignSelf: 'center', zIndex: 5, flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.full, backgroundColor: 'rgba(6,13,26,0.75)',
+  },
+  weakText: { color: '#FFD9A0', fontSize: 12, fontWeight: '700' },
   stuck: { flexDirection: 'column', gap: spacing.md, paddingHorizontal: spacing.lg },
   stuckRow: { flexDirection: 'row', gap: spacing.sm, alignSelf: 'stretch' },
   stuckBtn: { flex: 1 },

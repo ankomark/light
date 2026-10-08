@@ -79,7 +79,9 @@ jest.mock('livekit-client', () => ({
   RoomEvent: {
     DataReceived: 'data', ConnectionStateChanged: 'state', TrackPublished: 'tp',
     TrackSubscriptionFailed: 'tsf', ParticipantConnected: 'pc',
+    ParticipantPermissionsChanged: 'perms', ConnectionQualityChanged: 'quality',
   },
+  ConnectionQuality: { Excellent: 'excellent', Good: 'good', Poor: 'poor', Lost: 'lost' },
   ConnectionState: { Connected: 'connected', Reconnecting: 'reconnecting', SignalReconnecting: 'signal' },
   DisconnectReason: { CLIENT_INITIATED: 1, PARTICIPANT_REMOVED: 4, ROOM_DELETED: 5 },
   VideoPresets: { h180: {}, h360: {}, h720: { resolution: {}, encoding: {} } },
@@ -89,9 +91,13 @@ jest.mock('../../../utils/orientation', () => ({ lockPortrait: jest.fn(), allowA
 jest.mock('../../../hooks/useKeyboardHeight', () => ({ __esModule: true, default: () => 0 }));
 jest.mock('../../ReportModal', () => () => null);
 jest.mock('../GraphicComposer', () => () => null);
+const mockFloated = [];
 jest.mock('../FloatingReactions', () => {
   const R = require('react');
-  return R.forwardRef(() => null);
+  return R.forwardRef((_p, ref) => {
+    R.useImperativeHandle(ref, () => ({ add: (e) => mockFloated.push(e) }));
+    return null;
+  });
 });
 jest.mock('../LiveGraphic', () => {
   const { Text: T } = require('react-native');
@@ -102,6 +108,8 @@ const { peekCache, writeCache, userKey } = require('../../../utils/screenCache')
 const LiveHub = require('../LiveHub').default;
 const GoLive = require('../GoLive').default;
 const LiveRoom = require('../LiveRoom').default;
+const LiveSummary = require('../LiveSummary').default;
+const { fmtDuration } = require('../LiveSummary');
 
 const nav = () => ({
   navigate: jest.fn(), goBack: jest.fn(), replace: jest.fn(), setParams: jest.fn(),
@@ -116,6 +124,8 @@ beforeEach(() => {
   mockPerm = { granted: true };
   mockRoom.handlers = {};
   mockParticipants = [mockHost, mockLocal];
+  mockFloated.length = 0;
+  mockRoom.localParticipant.publishData = jest.fn(() => Promise.resolve());
 });
 
 describe('Live hub', () => {
@@ -280,3 +290,160 @@ describe('Live room chat', () => {
   });
 });
 
+
+describe('Live room - TikTok-style extras', () => {
+  // UTF-8, as the app's own encoder writes it (emoji are 4 bytes).
+  const bytes = (obj) => Uint8Array.from(unescape(encodeURIComponent(JSON.stringify(obj))), (c) => c.charCodeAt(0));
+  const decode = (b) => JSON.parse(decodeURIComponent(escape(String.fromCharCode(...b))));
+  const broadcast = { id: 3, kind: 'meet', title: 'Evening hymns', host: { id: 1, username: 'pastor' } };
+  const emit = (ev, ...args) => act(() => { (mockRoom.handlers[ev] || []).forEach((fn) => fn(...args)); });
+  const send = (obj, sender) => emit('data', bytes(obj), sender);
+  const open = (role = 'viewer', extra = {}) => render(<LiveRoom navigation={nav()}
+    route={{ params: { url: 'wss://x', token: 't', broadcast: { ...broadcast, ...extra }, role } }} />);
+  const viewer = { identity: 'u9', name: 'mary', permissions: { canPublish: false } };
+
+  test('a reaction that is not one the app offers floats as a heart', () => {
+    open();
+    send({ t: 'react', emoji: '🙏' }, viewer);
+    send({ t: 'react', emoji: 'BUY NOW at spam.example' }, viewer);
+    expect(mockFloated).toEqual(['🙏', '❤️']);
+  });
+
+  test('the host taps a comment and pins it for everyone', async () => {
+    mockParticipants = [mockHost, mockLocal, viewer];
+    mockApi.pinBroadcastComment.mockResolvedValue({ pinned: { user_id: 9, name: 'mary', text: 'Amen', by: 'pastor' } });
+    const screen = open('host');
+    send({ t: 'chat', id: 'a', text: 'Amen' }, viewer);
+    fireEvent.press(screen.getByTestId('chat-u9-a'));
+    await act(async () => { fireEvent.press(screen.getByTestId('person-pin')); });
+    expect(mockApi.pinBroadcastComment).toHaveBeenCalledWith(3, 9, 'Amen');
+    expect(screen.getByTestId('chat-pinned')).toBeTruthy();
+    const sent = mockRoom.localParticipant.publishData.mock.calls.map(([b]) => decode(b));
+    expect(sent.some((m) => m.t === 'pin' && m.pinned.text === 'Amen')).toBe(true);
+  });
+
+  test('the host mutes someone in chat from their name', async () => {
+    mockApi.muteBroadcastChat.mockResolvedValue({ muted: true });
+    const screen = open('host');
+    send({ t: 'chat', id: 'a', text: 'spam spam' }, viewer);
+    fireEvent.press(screen.getByTestId('chat-u9-a'));
+    await act(async () => { fireEvent.press(screen.getByTestId('person-mute')); });
+    expect(mockApi.muteBroadcastChat).toHaveBeenCalledWith(3, 9, true);
+    // Asked again: it now offers to unmute.
+    fireEvent.press(screen.getByTestId('chat-u9-a'));
+    expect(screen.getByText('live.unmuteChat')).toBeTruthy();
+  });
+
+  test('a viewer cannot pin, mute or remove - only see a profile', () => {
+    const screen = open('viewer');
+    send({ t: 'chat', id: 'a', text: 'Hello' }, viewer);
+    fireEvent.press(screen.getByTestId('chat-u9-a'));
+    expect(screen.getByTestId('person-profile')).toBeTruthy();
+    expect(screen.queryByTestId('person-pin')).toBeNull();
+    expect(screen.queryByTestId('person-mute')).toBeNull();
+    expect(screen.queryByTestId('person-remove')).toBeNull();
+  });
+
+  test('a pin from a viewer is ignored', () => {
+    const screen = open();
+    send({ t: 'pin', pinned: { name: 'x', text: 'fake pin' } }, viewer);
+    expect(screen.queryByTestId('chat-pinned')).toBeNull();
+  });
+
+  test('muted: the composer says so, from the start or the moment it happens', () => {
+    let screen = open('viewer', { chat_muted: true });
+    expect(screen.getByTestId('chat-muted')).toBeTruthy();
+    screen.unmount();
+    screen = open('viewer');
+    expect(screen.queryByTestId('chat-muted')).toBeNull();
+    mockRoom.localParticipant.identity = 'u7';
+    mockRoom.localParticipant.permissions = { canPublishData: false };
+    emit('perms', {}, mockRoom.localParticipant);
+    expect(screen.getByTestId('chat-muted')).toBeTruthy();
+    delete mockRoom.localParticipant.permissions;
+  });
+
+  test('the host hands recent chat to a late joiner, addressed to them only', () => {
+    open('host');
+    send({ t: 'chat', id: 'a', text: 'Welcome' }, viewer);
+    emit('pc', { identity: 'u20', name: 'late' });
+    const call = mockRoom.localParticipant.publishData.mock.calls.find(([b]) => decode(b).t === 'history');
+    expect(call[1].destinationIdentities).toEqual(['u20']);
+    expect(decode(call[0]).items[0]).toMatchObject({ text: 'Welcome', uid: 'u9' });
+  });
+
+  test('a late joiner takes history from the host only, once', () => {
+    const screen = open();
+    send({ t: 'history', items: [{ id: 1, name: 'mary', text: 'Earlier line', uid: 'u9' }] }, viewer);
+    expect(screen.queryByText('Earlier line')).toBeNull();
+    send({ t: 'history', items: [{ id: 1, name: 'mary', text: 'Earlier line', uid: 'u9' }] }, mockHost);
+    expect(screen.getByText('Earlier line')).toBeTruthy();
+    send({ t: 'history', items: [{ id: 2, name: 'mary', text: 'Again', uid: 'u9' }] }, mockHost);
+    expect(screen.queryByText('Again')).toBeNull();
+  });
+
+  test('joins are gathered into one line', () => {
+    jest.useFakeTimers();
+    try {
+      const screen = open();
+      emit('pc', { identity: 'u30', name: 'ann' });
+      emit('pc', { identity: 'u31', name: 'ben' });
+      emit('pc', { identity: 'u32', name: 'cy' });
+      act(() => { jest.advanceTimersByTime(3100); });
+      expect(screen.getByText('live.joinedMany:cy,2')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("a weak connection is said - mine, or the host's", () => {
+    const screen = open();
+    expect(screen.queryByTestId('live-weak')).toBeNull();
+    emit('quality', 'poor', mockHost);
+    expect(screen.getByText('live.weakHost')).toBeTruthy();
+    emit('quality', 'good', mockHost);
+    expect(screen.queryByTestId('live-weak')).toBeNull();
+  });
+
+  test('a long press on the heart offers more reactions', () => {
+    const screen = open();
+    fireEvent(screen.getByTestId('live-heart'), 'longPress');
+    fireEvent.press(screen.getByTestId('react-🔥'));
+    expect(mockFloated).toContain('🔥');
+  });
+
+  test('the viewer count opens who is watching', () => {
+    mockParticipants = [mockHost, mockLocal, viewer];
+    const screen = open();
+    fireEvent.press(screen.getByTestId('live-people'));
+    expect(screen.getByTestId('person-u9')).toBeTruthy();
+  });
+});
+
+describe('Live summary and joining speed', () => {
+  test('the summary shows how it went', () => {
+    expect(fmtDuration(3725)).toBe('1:02:05');
+    expect(fmtDuration(65)).toBe('1:05');
+    const navigation = nav();
+    const screen = render(<LiveSummary navigation={navigation} route={{ params: { summary: {
+      title: 'Evening hymns', duration_seconds: 65, peak_viewer_count: 40, like_count: 300, comments: 12,
+    } } }} />);
+    expect(screen.getByText('1:05')).toBeTruthy();
+    expect(screen.getByText('40')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('summary-done'));
+    expect(navigation.goBack).toHaveBeenCalled();
+  });
+
+  test('the join token is asked for when the finger lands, once', async () => {
+    mockApi.fetchBroadcasts.mockResolvedValue({ results: [room(41, 'Bible study')] });
+    mockApi.fetchBroadcastToken.mockResolvedValue({ url: 'wss://x', token: 'tok', broadcast: room(41, 'Bible study') });
+    const navigation = nav();
+    const screen = render(<LiveHub navigation={navigation} route={{ params: {} }} />);
+    await act(async () => {});
+    fireEvent(screen.getByText('Bible study'), 'pressIn');
+    expect(mockApi.fetchBroadcastToken).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.press(screen.getByText('Bible study')); });
+    expect(mockApi.fetchBroadcastToken).toHaveBeenCalledTimes(1);
+    expect(navigation.navigate).toHaveBeenCalledWith('LiveRoom', expect.objectContaining({ token: 'tok' }));
+  });
+});

@@ -250,6 +250,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
             room=b.room_name, can_publish=False,  # viewers are subscribe-only
+            can_publish_data=request.user.id not in (b.muted_ids or []),
         )
         return Response(_broadcast_payload(b, token, request))
 
@@ -392,7 +393,8 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         req.save(update_fields=['status'])
         # Grant publish rights on the co-host's live connection so they can turn
         # on mic/camera immediately — no client-side token swap / reconnect.
-        lk.grant_publish(b.room_name, _identity(req.user))
+        lk.set_permissions(b.room_name, _identity(req.user), can_publish=True,
+                           can_publish_data=req.user_id not in (b.muted_ids or []))
         notify_user(req.user, 'cohost_approved', f"You're now a co-host on {b.title}", {
             'type': 'cohost_approved', 'broadcast_id': b.id,
         })
@@ -423,8 +425,64 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
             room=b.room_name, can_publish=True,
+            can_publish_data=request.user.id not in (b.muted_ids or []),
         )
         return Response(_broadcast_payload(b, token, request))
+
+    # ── Chat moderation: pin a comment, mute someone in chat ─────────────────
+    def _may_moderate(self, request, b):
+        if b.host_id == request.user.id:
+            return True
+        if b.cohost_requests.filter(user=request.user, status='approved').exists():
+            return True
+        return _admin_may(request)
+
+    @action(detail=True, methods=['post'])
+    def pin(self, request, pk=None):
+        """Pin a viewer's comment above the chat (or clear it). The name is
+        the commenter's username from the database, never sent text."""
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
+        if not self._may_moderate(request, b):
+            return Response({'error': 'Only the host or a co-host can pin.'}, status=status.HTTP_403_FORBIDDEN)
+        if b.status != 'live':
+            return Response({'error': 'This broadcast has ended.', 'code': 'ended'}, status=status.HTTP_410_GONE)
+        text = _clean_title(request.data.get('text'), 200)
+        author = User.objects.filter(pk=_int(request.data.get('user_id')) or 0).first()
+        if request.data.get('clear') or not text or author is None:
+            b.pinned = None
+        else:
+            b.pinned = {'user_id': author.id, 'name': author.username, 'text': text, 'by': request.user.username}
+        b.save(update_fields=['pinned'])
+        return Response({'pinned': b.pinned})
+
+    @action(detail=True, methods=['post'], url_path='mute-chat')
+    def mute_chat(self, request, pk=None):
+        """Mute (or unmute) someone in this broadcast's chat. They keep
+        watching; LiveKit stops relaying their messages at once."""
+        b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
+        if not self._may_moderate(request, b):
+            return Response({'error': 'Only the host or a co-host can mute.'}, status=status.HTTP_403_FORBIDDEN)
+        target = User.objects.filter(pk=_int(request.data.get('user_id')) or 0).first()
+        if target is None:
+            return Response({'error': 'user_id required'}, status=status.HTTP_400_BAD_REQUEST)
+        on_stage = b.cohost_requests.filter(user=target, status='approved').exists()
+        # Nobody mutes the host; only the host (or an admin) mutes a co-host.
+        if target.id == b.host_id or (on_stage and b.host_id != request.user.id and not _admin_may(request)):
+            return Response({'error': 'You cannot mute them.'}, status=status.HTTP_403_FORBIDDEN)
+        mute = str(request.data.get('mute', True)).lower() not in ('false', '0', 'no')
+        ids = set(b.muted_ids or [])
+        (ids.add if mute else ids.discard)(target.id)
+        b.muted_ids = sorted(ids)
+        b.save(update_fields=['muted_ids'])
+        lk.set_permissions(b.room_name, _identity(target), can_publish=on_stage, can_publish_data=not mute)
+        if not self._is_host_or_cohost(request, b):
+            _log_admin(request, 'live_mute_chat' if mute else 'live_unmute_chat', b)
+        return Response({'muted': mute, 'user_id': target.id})
+
+    @staticmethod
+    def _is_host_or_cohost(request, b):
+        return b.host_id == request.user.id or b.cohost_requests.filter(
+            user=request.user, status='approved').exists()
 
     # ── Moderation (host): remove a participant ─────────────────────────────────
     @action(detail=True, methods=['post'])
@@ -496,6 +554,10 @@ class LiveKitWebhookView(APIView):
                                        | Q(blocker_id=user_id, blocked_id=b.host_id)).exists()
         if removed or blocked:
             lk.remove_participant(room_name, identity)
+        elif user_id in (b.muted_ids or []):
+            # Their token predates the mute: take chat away again.
+            on_stage = CoHostRequest.objects.filter(broadcast=b, user_id=user_id, status='approved').exists()
+            lk.set_permissions(room_name, identity, can_publish=on_stage, can_publish_data=False)
 
     @staticmethod
     def _end_if_host_left(room_name, event):
@@ -509,3 +571,41 @@ class LiveKitWebhookView(APIView):
             b.ended_at = timezone.now()
             b.save(update_fields=['status', 'ended_at'])
             lk.end_room(room_name)
+
+
+def live_share_page(request, broadcast_id):
+    """A broadcast's public page for a shared link: a card (host, title, live
+    now or ended) and a hand-off into the app, straight into the room.
+    Single & Searching rooms are never shared."""
+    from django.http import HttpResponse, HttpResponseNotFound
+    from .social import _SHARE_PAGE, _esc
+    b = (LiveBroadcast.objects.filter(pk=broadcast_id, is_removed=False, singles_only=False,
+                                      host__is_deactivated=False)
+         .select_related('host__profile').first())
+    if b is None:
+        return HttpResponseNotFound('Broadcast not found')
+    live_now = b.status == 'live'
+    desc = (f'@{b.host.username} is live now: {b.title}' if live_now
+            else f'@{b.host.username} was live: {b.title}')
+    prof = getattr(b.host, 'profile', None)
+    fallback = getattr(settings, 'SHARE_FALLBACK_IMAGE', '') or request.build_absolute_uri('/share-og.png')
+    image = (media.resolve(prof.picture) if prof is not None and getattr(prof, 'picture', None) else '') or fallback
+    html = (
+        _SHARE_PAGE
+        .replace('__OGTYPE__', 'video.other')
+        .replace('__VIDEO_TAGS__', '')
+        .replace('__IMG_BLOCK__', f'<img src="{_esc(image)}" alt="">')
+        .replace('__PLAY_BLOCK__', '')
+        .replace('__CAPTION_BLOCK__', f'\n      <p class="caption">{_esc(desc[:300])}</p>')
+        .replace('__STORE_BLOCK__', '')
+        .replace('__USER__', _esc(f'@{b.host.username}'))
+        .replace('__TITLE__', _esc(f'{b.title} - live on Adventist Life'))
+        .replace('__DESC__', _esc(desc[:200]))
+        .replace('__IMAGE__', _esc(image))
+        .replace('__URL__', _esc(request.build_absolute_uri()))
+        .replace('__DEEP__', _esc(f'streams://live/{b.id}'))
+    )
+    resp = HttpResponse(html)
+    # Live-or-ended changes: a short cache.
+    resp['Cache-Control'] = 'public, max-age=60'
+    return resp

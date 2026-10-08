@@ -2991,6 +2991,13 @@ class LiveBroadcast(models.Model):
     # null. Persisted so it survives a host reconnect and reaches late joiners in
     # the join payload. Shape: {"style": str, "title": str, "sub": str}.
     overlay = models.JSONField(null=True, blank=True, default=None)
+    # The comment the host (or a co-host) pinned above the chat, or null:
+    # {"user_id": int, "name": str, "text": str, "by": str}. Persisted so
+    # late joiners see it.
+    pinned = models.JSONField(null=True, blank=True, default=None)
+    # User ids the host muted in chat for this broadcast: they still watch,
+    # but LiveKit refuses their messages (no data-publish permission).
+    muted_ids = models.JSONField(default=list, blank=True)
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
 

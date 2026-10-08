@@ -6,6 +6,7 @@ from django.conf.urls.static import static
 from songs.views.directory import service_share_page
 from songs.views import SignUpView, ThrottledTokenObtainPairView, DeviceTokenRefreshView, LogoutView, health_check, post_share_page, share_brand_image
 from songs.views.social import profile_share_page
+from songs.views.live import live_share_page
 
 # Django's own admin signs in with a password alone, so it is off unless
 # DJANGO_ADMIN_ENABLED, and then only an active superuser gets in (Django's
@@ -22,6 +23,7 @@ urlpatterns = [
     path('service/<int:service_id>/', service_share_page, name='service-share-page'),
     # A person's shared profile (rich card + deep link into the app).
     path('u/<str:username>/', profile_share_page, name='profile-share-page'),
+    path('live/<int:broadcast_id>/', live_share_page, name='live-share-page'),
     # Branded fallback image for share cards (posts with no still of their own).
     path('share-og.png', share_brand_image, name='share-brand-image'),
 

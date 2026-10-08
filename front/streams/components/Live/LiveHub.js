@@ -25,6 +25,20 @@ const KIND_KEY = { meet: 'live.kindMeet', tv: 'live.kindTv' };
 const REFRESH_MS = 30000;
 const GRID_GAP = 8;
 
+// Joining starts when a finger lands on a card, not when it lifts: the join
+// token is already on its way during the tap (a round trip saved on every
+// join). Kept a minute, then asked for again.
+const TOKEN_FRESH_MS = 60000;
+const tokenCache = new Map();
+export const prefetchJoin = (id) => {
+  const hit = tokenCache.get(id);
+  if (hit && Date.now() - hit.at < TOKEN_FRESH_MS) return hit.promise;
+  const promise = fetchBroadcastToken(id);
+  tokenCache.set(id, { promise, at: Date.now() });
+  promise.catch(() => tokenCache.delete(id));
+  return promise;
+};
+
 // Why a join was refused, in the viewer's language (server codes).
 export const joinRefusal = (t, e) => {
   const code = e?.response?.data?.code;
@@ -89,7 +103,8 @@ const LiveHub = ({ navigation, route }) => {
   const openViewer = useCallback(async (b) => {
     setOpening(b.id);
     try {
-      const res = await fetchBroadcastToken(b.id);
+      const res = await prefetchJoin(b.id);
+      tokenCache.delete(b.id);     // used: the next join asks afresh (mute state, ended)
       navigation.navigate('LiveRoom', { url: res.url, token: res.token, broadcast: res.broadcast, role: 'viewer' });
     } catch (e) {
       Alert.alert(t('live.title'), joinRefusal(t, e));
@@ -143,7 +158,8 @@ const LiveHub = ({ navigation, route }) => {
     const host = item.host || {};
     const busy = opening === item.id;
     return (
-      <TouchableOpacity style={[styles.hero, width >= 600 && { height: 300 }]} activeOpacity={0.92} onPress={() => openViewer(item)} disabled={busy}>
+      <TouchableOpacity style={[styles.hero, width >= 600 && { height: 300 }]} activeOpacity={0.92} onPressIn={() => { prefetchJoin(item.id).catch(() => {}); }}
+        onPress={() => openViewer(item)} disabled={busy}>
         <Image
           source={host.profile_picture ? { uri: host.profile_picture } : DEFAULT_AVATAR}
           defaultSource={DEFAULT_AVATAR}
@@ -176,7 +192,8 @@ const LiveHub = ({ navigation, route }) => {
     const host = item.host || {};
     const busy = opening === item.id;
     return (
-      <TouchableOpacity style={[styles.mini, { width: tileW }]} activeOpacity={0.92} onPress={() => openViewer(item)} disabled={busy}>
+      <TouchableOpacity style={[styles.mini, { width: tileW }]} activeOpacity={0.92} onPressIn={() => { prefetchJoin(item.id).catch(() => {}); }}
+        onPress={() => openViewer(item)} disabled={busy}>
         <Image
           source={host.profile_picture ? { uri: host.profile_picture } : DEFAULT_AVATAR}
           defaultSource={DEFAULT_AVATAR}
