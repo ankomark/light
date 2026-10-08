@@ -157,7 +157,7 @@ export async function unregisterPushToken() {
 
     await AsyncStorage.removeItem(PUSH_TOKEN_KEY);
   } catch (error) {
-    console.error('[Push] Failed to unregister token:', error?.message);
+    console.warn('[Push] Failed to unregister token:', error?.message);
   }
 }
 

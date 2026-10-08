@@ -116,7 +116,7 @@ const GroupForm = ({ navigation, route }) => {
         setCoverImage(processedImage.uri);
       }
     } catch (error) {
-      console.error('Image picker error:', error);
+      console.warn('Image picker error:', error);
       notify(t('common.error'), t(`${ns}.imageFailed`));
     }
   };
@@ -185,7 +185,7 @@ const GroupForm = ({ navigation, route }) => {
         navigation.replace('GroupDetail', { groupSlug: response.slug, group: response });
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.warn('Error:', error);
       // Error shapes vary: apiRequest throws an Error with .response.data;
       // createGroup (raw axios) rejects with the response body object itself.
       const body = error?.response?.data || (error instanceof Error ? null : error);

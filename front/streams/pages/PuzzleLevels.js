@@ -5,7 +5,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchPuzzleLevels } from '../services/api';
@@ -21,6 +21,8 @@ import {
 
 // Locked levels drawn past the next one, so the map reads as a road ahead.
 const LOCKED_SHOWN = 3;
+// One row: the dot, its stars line and the gap below.
+const ROW_H = 84;
 
 const PuzzleLevels = ({ navigation, route }) => {
   const { t, resolvedLanguage } = useI18n();
@@ -55,10 +57,28 @@ const PuzzleLevels = ({ navigation, route }) => {
 
   const levels = data?.levels || [];
   const next = data?.next_level || 1;
-  const locked = Array.from({ length: LOCKED_SHOWN }, (_, i) => next + 1 + i);
+  const locked = data ? Array.from({ length: LOCKED_SHOWN }, (_, i) => ({ level: next + 1 + i, locked: true })) : [];
+  // A long-time player has hundreds of levels: drawn as they scroll into
+  // view (all at once made the map slow to open), five a row on a phone and
+  // eight on a tablet.
+  const { width } = useWindowDimensions();
+  const cols = width >= 700 ? 8 : 5;
+  const cells = [...levels, ...locked];
 
-  return (
-    <ScrollView contentContainerStyle={styles.body} testID="puzzle-levels">
+  // Open at the level to play next, not at level 1 four hundred levels back.
+  const listRef = useRef(null);
+  const scrolledFor = useRef(null);
+  useEffect(() => {
+    if (!data || scrolledFor.current === next || next <= cols * 3) return;
+    scrolledFor.current = next;
+    const row = Math.floor((next - 1) / cols);
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset?.({ offset: Math.max(0, (row - 2) * ROW_H), animated: false });
+    });
+  }, [data, next, cols]);
+
+  const header = (
+    <View>
       <Text style={q.pageTitle}>{data?.theme?.name || route?.params?.name}</Text>
       {!!data?.theme && (
         <Text style={styles.sub}>
@@ -72,14 +92,24 @@ const PuzzleLevels = ({ navigation, route }) => {
           <Text style={q.gold}>{t('common.retry')}</Text>
         </TouchableOpacity>
       )}
+    </View>
+  );
 
-      <View style={styles.grid}>
-        {levels.map((lv) => {
-          const isNext = lv.level === next && !lv.is_complete;
-          return (
+  const renderCell = ({ item: lv }) => {
+    if (lv.locked) {
+      return (
+        <View style={[styles.cell, { width: `${100 / cols}%` }]} accessibilityLabel={t('puzzle.levels.locked', { level: lv.level })}>
+          <View style={[styles.dot, styles.dotLocked]}>
+            <Ionicons name="lock-closed" size={14} color={MUTED} />
+          </View>
+          <Text style={styles.stars} />
+        </View>
+      );
+    }
+    const isNext = lv.level === next && !lv.is_complete;
+    return (
             <TouchableOpacity
-              key={lv.level}
-              style={styles.cell}
+              style={[styles.cell, { width: `${100 / cols}%` }]}
               onPress={() => playPuzzle(navigation, { theme: slug, level: lv.level })}
               activeOpacity={0.85}
               accessibilityRole="button"
@@ -95,18 +125,24 @@ const PuzzleLevels = ({ navigation, route }) => {
                 {lv.is_complete ? starText(lv.stars) : isNext ? t('puzzle.levels.next') : ''}
               </Text>
             </TouchableOpacity>
-          );
-        })}
-        {!!data && locked.map((n) => (
-          <View key={n} style={styles.cell} accessibilityLabel={t('puzzle.levels.locked', { level: n })}>
-            <View style={[styles.dot, styles.dotLocked]}>
-              <Ionicons name="lock-closed" size={14} color={MUTED} />
-            </View>
-            <Text style={styles.stars} />
-          </View>
-        ))}
-      </View>
-    </ScrollView>
+    );
+  };
+
+  return (
+    <FlatList
+      ref={listRef}
+      key={cols}                       // a column count change needs a new list
+      data={cells}
+      numColumns={cols}
+      keyExtractor={(lv) => String(lv.level)}
+      renderItem={renderCell}
+      ListHeaderComponent={header}
+      contentContainerStyle={styles.body}
+      initialNumToRender={cols * 8}
+      windowSize={7}
+      removeClippedSubviews
+      testID="puzzle-levels"
+    />
   );
 };
 
@@ -115,8 +151,7 @@ const styles = StyleSheet.create({
   sub: { fontSize: 13, color: '#A9BCD0', marginTop: 4, marginBottom: 16 },
   loading: { marginTop: 24 },
   retry: { alignItems: 'center', gap: 6, padding: 16 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start' },
-  cell: { width: '20%', alignItems: 'center', marginBottom: 16 },
+  cell: { alignItems: 'center', height: ROW_H, paddingBottom: 16 },
   dot: {
     width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(5,8,14,0.72)',

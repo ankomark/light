@@ -52,7 +52,7 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, variant }) => 
       setEditModalVisible(false);
       Alert.alert(t('market.success'), t('post.updatedOk'));
     } catch (error) {
-      console.error('Error updating post:', error);
+      console.warn('Error updating post:', error);
       Alert.alert(t('common.error'), t('post.updateFailed'));
     } finally {
       setLoading(false);
@@ -83,7 +83,7 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, variant }) => 
               emit(EVENTS.POST_DELETED, { postId: post.id });
               Alert.alert(t('market.success'), t('post.deletedOk'));
             } catch (error) {
-              console.error('Error deleting post:', error);
+              console.warn('Error deleting post:', error);
               Alert.alert(t('common.error'), t('post.deleteFailed'));
             } finally {
               setLoading(false);

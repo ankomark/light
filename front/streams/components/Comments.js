@@ -74,7 +74,7 @@ const Comments = ({ trackId, initialCount = 0, highlightCommentId, autoOpen = fa
             setComments(Array.isArray(data) ? data : []);
             setFetched(true);
         } catch (error) {
-            console.error('Failed to fetch comments:', error);
+            console.warn('Failed to fetch comments:', error);
             if (!hadCache) Alert.alert(t('common.error'), t('comments.loadFailed'));
         } finally {
             setLoading(false);
@@ -165,7 +165,7 @@ const Comments = ({ trackId, initialCount = 0, highlightCommentId, autoOpen = fa
             };
             setComments(prev => prev.map(c => (c.id === tempId ? posted : c)));
         } catch (error) {
-            console.error('Failed to post comment:', error);
+            console.warn('Failed to post comment:', error);
             setComments(prev => prev.filter(c => c.id !== tempId));
             setNewComment(content);
             Alert.alert(t('common.error'), t('comments.postFailed'));

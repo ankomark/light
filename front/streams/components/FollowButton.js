@@ -74,7 +74,7 @@ const FollowButton = ({
         });
       }
     } catch (error) {
-      console.error('Follow error:', error);
+      console.warn('Follow error:', error);
       desired.current = server.current;                   // roll back
       setFollowStatus(serverStatus.current);
       setFollowersCount(serverCount.current);

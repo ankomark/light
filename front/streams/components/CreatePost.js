@@ -408,7 +408,7 @@ const CreatePost = ({ navigation }) => {
             const out = await compressImage(sel.uri, sel.width);
             cropSrc = { uri: out.uri, width: out.width || sel.width, height: out.height || sel.height };
           } catch (e) {
-            console.error('Pre-crop downscale failed; using original:', e);
+            console.warn('Pre-crop downscale failed; using original:', e);
           }
           originalAssetRef.current = cropSrc;
           setCropTarget(cropSrc);
@@ -436,7 +436,7 @@ const CreatePost = ({ navigation }) => {
         setPreparingMedia(false);
       }
     } catch (error) {
-      console.error('Media picker error:', error);
+      console.warn('Media picker error:', error);
       Alert.alert(t('common.error'), t('create.post.pickMediaFailed'));
     }
   }, [contentType, images.length, acceptVideo, t]);
@@ -540,7 +540,7 @@ const CreatePost = ({ navigation }) => {
       setTrimStart(start);
       setTrimEnd(start + clip);
     } catch (error) {
-      console.error('Error loading song:', error);
+      console.warn('Error loading song:', error);
       Alert.alert(t('common.error'), t('create.post.trimLoadFailed'));
     }
   };
@@ -561,7 +561,7 @@ const CreatePost = ({ navigation }) => {
         audio_url: asset.uri,
       });
     } catch (error) {
-      console.error('Error picking audio:', error);
+      console.warn('Error picking audio:', error);
       Alert.alert(t('common.error'), t('create.post.pickAudioFailed'));
     }
   };

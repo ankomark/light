@@ -204,7 +204,7 @@ const CommentAction = ({
       rememberComments(api.cacheKey, list);
     } catch (error) {
       if (!hadCache) Alert.alert(t('common.error'), t('comments.loadFailed'));
-      console.error('Comments fetch error:', error);
+      console.warn('Comments fetch error:', error);
     } finally {
       setLoading(false);
     }

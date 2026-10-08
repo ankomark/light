@@ -257,7 +257,8 @@ const ExploreScreen = ({ navigation }) => {
         setResults(res);
         if (hasResults(res)) saveRecent(q);
       } catch {
-        if (req === reqRef.current) setResults({ users: [], hashtags: [], posts: [], tracks: [], groups: [] });
+        // Not "no results": the search did not get through (marked, not remembered).
+        if (req === reqRef.current) setResults({ users: [], hashtags: [], posts: [], tracks: [], groups: [], failed: true });
       } finally {
         if (req === reqRef.current) setSearching(false);
       }
@@ -397,8 +398,10 @@ const ExploreScreen = ({ navigation }) => {
     if (!hasResults(results)) {
       return (
         <View style={styles.centered}>
-          <MaterialIcons name="search-off" size={48} color={colors.textMuted} />
-          <Text style={styles.emptyText}>{t('explore.noResults', { q: query.trim() })}</Text>
+          <MaterialIcons name={results?.failed ? 'wifi-off' : 'search-off'} size={48} color={colors.textMuted} />
+          <Text style={styles.emptyText}>
+            {results?.failed ? t('auth.cantReach') : t('explore.noResults', { q: query.trim() })}
+          </Text>
         </View>
       );
     }

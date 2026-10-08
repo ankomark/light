@@ -358,7 +358,7 @@ export const DownloadButton = ({ mediaUrl, publicId, contentType }) => {
 
       Alert.alert(t('social.download.savedTitle'), t('social.download.saved'));
     } catch (error) {
-      console.error('Download error:', error);
+      console.warn('Download error:', error);
 
       let errorMessage = t('social.download.failed');
       if (error.message?.includes('permission')) {

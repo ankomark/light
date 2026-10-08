@@ -24,15 +24,22 @@ const NoticeDetail = ({ route, navigation }) => {
   const key = userKey(currentUser?.id, `notice:${id}`);
   const [notice, setNotice] = useState(() => route?.params?.notice || peekCache(key) || null);
   const [gone, setGone] = useState(false);
+  // No answer and nothing kept (opened from a push, offline): said, with a
+  // retry - it was a loading skeleton for ever.
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     if (!notice) readCache(key).then((disk) => { if (!cancelled && disk) setNotice((n) => n || disk); });
     fetchNotice(id)
-      .then((n) => { if (!cancelled && n) { setNotice(n); writeCache(key, n); } })
-      .catch((e) => { if (!cancelled && e?.response?.status === 404) { setGone(true); writeCache(key, null); } });
+      .then((n) => { if (!cancelled && n) { setNotice(n); setFailed(false); writeCache(key, n); } })
+      .catch((e) => {
+        if (cancelled) return;
+        if (e?.response?.status === 404) { setGone(true); writeCache(key, null); } else setFailed(true);
+      });
     return () => { cancelled = true; };
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const share = () => {
     if (!notice) return;
@@ -56,6 +63,14 @@ const NoticeDetail = ({ route, navigation }) => {
         <View style={styles.gone}>
           <MaterialCommunityIcons name="bulletin-board" size={48} color={colors.textMuted} />
           <Text style={styles.goneText}>{t('notice.notAvailable')}</Text>
+        </View>
+      ) : !notice && failed ? (
+        <View style={styles.gone} testID="notice-detail-failed">
+          <MaterialCommunityIcons name="wifi-off" size={44} color={colors.textMuted} />
+          <Text style={styles.goneText}>{t('common.somethingWrong')}</Text>
+          <TouchableOpacity onPress={() => { setFailed(false); setAttempt((a) => a + 1); }} accessibilityRole="button" testID="notice-retry">
+            <Text style={[styles.goneText, { color: colors.accent }]}>{t('common.retry')}</Text>
+          </TouchableOpacity>
         </View>
       ) : !notice ? (
         <View style={styles.body} testID="notice-detail-skeleton">

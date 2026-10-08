@@ -118,7 +118,7 @@ const CreateProfile = () => {
         setProfileData(prev => ({ ...prev, picture: compressedImage.uri }));
       }
     } catch (error) {
-      console.error('Image selection error:', error);
+      console.warn('Image selection error:', error);
       Alert.alert(t('common.error'), t('createProfile.imageFailed'));
     }
   };
@@ -216,7 +216,7 @@ const CreateProfile = () => {
         navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
       }
     } catch (error) {
-      console.error('Profile creation error:', error.response?.data || error);
+      console.warn('Profile creation error:', error.response?.data || error);
       
       let errorMessage = t('createProfile.createFailed');
       

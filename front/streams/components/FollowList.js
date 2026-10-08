@@ -142,7 +142,7 @@ const FollowList = () => {
       setPage(next);
       setHasMore(!!res?.next);
     } catch (err) {
-      console.error('Error loading more:', err);
+      console.warn('Error loading more:', err);
     } finally {
       setLoadingMore(false);
     }

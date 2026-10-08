@@ -62,7 +62,7 @@ const AdventistMedia = () => {
       const res = await fetchMediaStations(1, 'All');
       setStations(Array.isArray(res) ? res : (res?.results ?? []));
     } catch (err) {
-      console.error('Error loading stations:', err);
+      console.warn('Error loading stations:', err);
       setError(true);
     } finally {
       setIsLoading(false);
@@ -106,7 +106,7 @@ const AdventistMedia = () => {
         setNewStation((prev) => ({ ...prev, logo: uploaded.url }));
       }
     } catch (error) {
-      console.error('Logo picker error:', error);
+      console.warn('Logo picker error:', error);
       Alert.alert(t('common.error'), t('media.uploadFailed'));
     }
   };

@@ -37,9 +37,12 @@ export const SECTIONS = [
   // still be looked after from their own screens.
   { key: 'marketplace', icon: 'storefront-outline',
     routes: ['MarketplaceHome', 'ProductList', 'ProductDetail', 'Cart', 'Checkout', 'Wishlist', 'SellerShop',
-      'AddProduct', 'EditProduct'] },
+      'AddProduct', 'EditProduct', 'SelectTrack'] },
+  // Switched off, no event is created or changed; tickets already bought
+  // (My tickets, an order, recovery) and the gate scanner keep working.
   { key: 'tickets', icon: 'ticket-confirmation-outline',
-    routes: ['TicketsHome', 'TicketEvent', 'TicketCheckout', 'TicketHost', 'TicketCreateEvent', 'TicketFundraiser'] },
+    routes: ['TicketsHome', 'TicketEvent', 'TicketCheckout', 'TicketHost', 'TicketCreateEvent', 'TicketFundraiser',
+      'TicketMyEvents', 'TicketManageEvent', 'TicketEditEvent'] },
   { key: 'services', icon: 'storefront',
     routes: ['Studios', 'ServiceForm', 'ServiceDetail', 'ServiceVerification', 'ServiceBookings', 'ServiceInsights',
       'AdventistMedia'] },

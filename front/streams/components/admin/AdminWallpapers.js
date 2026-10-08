@@ -117,7 +117,7 @@ const AdminWallpapers = () => {
       await load();
       await refreshLiveWallpapers();   // apply it app-wide immediately
     } catch (error) {
-      console.error('Wallpaper upload failed:', error);
+      console.warn('Wallpaper upload failed:', error);
       notify(t('common.uploadFailedTitle'), error.message || t('wallpaper.uploadFailed'));
     } finally {
       setUploading(false);

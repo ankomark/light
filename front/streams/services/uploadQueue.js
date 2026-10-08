@@ -129,10 +129,10 @@ const pump = async () => {
     });
     patch(id, { status: 'done', progress: 1, result, finishedAt: Date.now() });
     try { config.cleanup(id); } catch { /* best effort */ }
-    try { config.onDone?.(getJob(id), result); } catch (e) { console.error('[uploadQueue] onDone', e); }
+    try { config.onDone?.(getJob(id), result); } catch (e) { console.warn('[uploadQueue] onDone', e); }
   } catch (error) {
     patch(id, { status: 'failed', error: error?.message || String(error) });
-    try { config.onFailed?.(getJob(id), error); } catch (e) { console.error('[uploadQueue] onFailed', e); }
+    try { config.onFailed?.(getJob(id), error); } catch (e) { console.warn('[uploadQueue] onFailed', e); }
   } finally {
     running = false;
     pump();

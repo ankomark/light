@@ -27,6 +27,8 @@ import ImageViewer from './ImageViewer';
 import { LikeButton, SaveButton } from './SocialActions';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { useAuth } from '../context/useAuth';
+import { peekCache, readCache, writeCache, dropCache, userKey } from '../utils/screenCache';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const getOptimizedUrl = (url, type = 'image') => {
@@ -72,16 +74,23 @@ const postedOn = (dateStr, t) => {
 const PostDetail = ({ route, navigation }) => {
   const { t } = useI18n();
   const { postId, commentId, shouldOpenComments } = route.params;
+  const { currentUser } = useAuth();
+  // Per viewer: what a post shows depends on who looks (private accounts,
+  // followers-only posts).
+  const cacheKey = userKey(currentUser?.id, `post:${postId}`);
+  const cached = peekCache(cacheKey);
   // Reactive media width — capped + centered on wide screens; reflows on
   // rotation / web resize (was a module-scope Dimensions.get snapshot).
   const { width: winW } = useWindowDimensions();
   const mediaFrameW = Math.min(winW - spacing.md * 2, 600);
   const [commentsVisible, setCommentsVisible] = useState(false);
   const flatListRef = useRef(null);
-  const [post, setPost] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // The last copy at once (a post opened before, or offline); the fresh one
+  // replaces it.
+  const [post, setPost] = useState(() => (cached ? processPost(cached) : null));
+  const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState(null);
-  const [commentsCount, setCommentsCount] = useState(0);
+  const [commentsCount, setCommentsCount] = useState(() => cached?.comments_count || 0);
   const videoRef = useRef(null);
   const [mediaError, setMediaError] = useState(false);
   const audioRef = useRef(null);
@@ -96,31 +105,50 @@ const PostDetail = ({ route, navigation }) => {
   }, [shouldOpenComments]);
 
   useEffect(() => {
+    let alive = true;
+    let shown = !!peekCache(cacheKey);
     const fetchPostDetail = async () => {
+      if (!shown) {
+        const disk = await readCache(cacheKey);
+        if (alive && disk) {
+          shown = true;
+          setPost(processPost(disk));
+          setCommentsCount(disk.comments_count || 0);
+          setLoading(false);
+        }
+      }
       try {
-        setLoading(true);
         const response = await axios.get(`${API_URL}/social-posts/${postId}/`);
+        if (!alive) return;
         const processedPost = processPost(response.data);
         setPost(processedPost);
+        setError(null);
         setCommentsCount(response.data.comments_count || 0);
+        writeCache(cacheKey, response.data);
       } catch (err) {
+        if (!alive) return;
         // 404 = the post is gone or no longer visible to this person (deleted,
         // taken down, made private, or on a private account they don't
         // follow). Say that, rather than a generic failure that invites a
-        // pointless retry.
+        // pointless retry - and the kept copy goes too.
         if (err?.response?.status === 404) {
+          dropCache(cacheKey);
+          setPost(null);
           setError(t('post.unavailable'));
-        } else {
-          console.error('Error fetching post details:', err);
+        } else if (!shown) {
+          if (__DEV__) console.warn('Error fetching post details:', err?.message);
           setError(t('post.loadFailed'));
         }
+        // Otherwise the kept copy stays up: offline is not "gone".
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
     };
 
     fetchPostDetail();
-  }, [postId, t]);
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postId, cacheKey]);
 
   // Normalized song fields — prefer the post's denormalized snapshot, fall
   // back to the nested track. (track.artist is an object, so read .username.)

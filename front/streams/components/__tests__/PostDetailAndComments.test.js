@@ -59,7 +59,11 @@ jest.mock('../../services/api', () => new Proxy({}, {
   get: (_, k) => (k === 'API_URL' ? 'https://api.test/api' : k === 'getAccessToken' ? async () => 't'
     : (...a) => (mockApi[k] ? mockApi[k](...a) : Promise.resolve({}))),
 }));
-jest.mock('../../utils/screenCache', () => ({ peekCache: () => null, readCache: async () => null, writeCache: jest.fn() }));
+const mockKept = new Map();
+jest.mock('../../utils/screenCache', () => ({
+  peekCache: () => null, readCache: async (k) => mockKept.get(k) ?? null, writeCache: jest.fn(), dropCache: jest.fn(),
+  userKey: (id, name) => `u${id}:${name}`,
+}));
 
 const { on, EVENTS } = require('../../utils/appEvents');
 const PostDetail = require('../PostDetail').default;
@@ -79,6 +83,15 @@ const open = (post) => {
 };
 
 describe("a post's own screen", () => {
+  test('offline: the copy kept from last time shows, not an error', async () => {
+    mockKept.set('u7:post:5', { ...basePost, caption: 'Kept caption' });
+    mockAxios.get.mockRejectedValueOnce(new Error('Network Error'));
+    const screen = render(<PostDetail route={{ params: { postId: 5 } }} navigation={{ goBack: jest.fn(), navigate: jest.fn() }} />);
+    await waitFor(() => expect(screen.getByText('Kept caption')).toBeTruthy(), { timeout: 5000 });
+    expect(screen.queryByText('post.loadFailed')).toBeNull();
+    mockKept.clear();
+  });
+
   test('deleting your post goes back once, and the feed hears of it', async () => {
     const alert = jest.spyOn(Alert, 'alert').mockImplementation((title, body, buttons) => buttons?.[1]?.onPress?.());
     const deleted = jest.fn();

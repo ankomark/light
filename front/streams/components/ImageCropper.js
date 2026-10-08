@@ -125,7 +125,7 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
       });
       onCropped?.({ uri: result.uri, width: result.width, height: result.height });
     } catch (e) {
-      console.error('Crop failed:', e);
+      console.warn('Crop failed:', e);
       onCropped?.({ uri, width: iw, height: ih }); // fall back to the original
     } finally {
       setWorking(false);
