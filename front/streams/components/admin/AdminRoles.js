@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
   Modal, TextInput, ScrollView,
 } from 'react-native';
+import KeyboardSheetPad from '../KeyboardSheetPad';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -127,10 +128,10 @@ const AdminRoles = () => {
 
       {/* Role editor */}
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={close}>
-        <View style={styles.sheetBackdrop}>
+        <KeyboardSheetPad style={styles.sheetBackdrop}>
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>{editing?.id ? 'Edit role' : 'New role'}</Text>
+            <Text style={styles.sheetTitle}>{editing?.id ? t('adminRoles.edit') : t('adminRoles.new')}</Text>
             <TextInput
               style={styles.input}
               placeholder={t('admin.rolePlaceholder')}
@@ -159,7 +160,7 @@ const AdminRoles = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardSheetPad>
       </Modal>
     </View>
   );

@@ -10,6 +10,7 @@
 //    reasons are one tap; anything else can be typed.
 import React, { createContext, useContext, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, ScrollView } from 'react-native';
+import KeyboardSheetPad from '../KeyboardSheetPad';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
 import { useAuth } from '../../context/useAuth';
@@ -106,7 +107,7 @@ export const useReasonSheet = () => {
 
   const sheet = (
     <Modal visible={!!ask} transparent animationType="slide" onRequestClose={() => close(null)}>
-      <View style={styles.backdrop}>
+      <KeyboardSheetPad style={styles.backdrop}>
         <View style={styles.sheet} testID="reason-sheet">
           <Text style={styles.title}>{ask?.title}</Text>
           {!!ask?.message && <Text style={styles.message}>{ask.message}</Text>}
@@ -154,7 +155,7 @@ export const useReasonSheet = () => {
             <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardSheetPad>
     </Modal>
   );
   return [sheet, askReason];

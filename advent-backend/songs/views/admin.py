@@ -378,7 +378,19 @@ class AdminDashboardView(APIView):
             # The newest accounts are in Users now; kept empty for older apps.
             'recent_users': [],
             'me': {'capabilities': me.capabilities, 'is_super_admin': me.is_super_admin},
+            # What needs a security admin now: open attack events, people
+            # waiting to get their account back.
+            'attention': self._attention() if can('manage_security') else None,
         })
+
+    @staticmethod
+    def _attention():
+        from ..models import RecoveryCase, SecurityEvent
+        return {
+            'security_events': SecurityEvent.objects.filter(resolved_at__isnull=True).count(),
+            'security_high': SecurityEvent.objects.filter(resolved_at__isnull=True, severity='high').count(),
+            'recovery': RecoveryCase.objects.filter(status=RecoveryCase.OPEN).count(),
+        }
 
 
 # ── Analytics (time-series) ──────────────────────────────────────────────────

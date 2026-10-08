@@ -5,6 +5,7 @@
 // action goes on once a code is given (services/api.js, utils/adminSession.js).
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal } from 'react-native';
+import KeyboardSheetPad from '../KeyboardSheetPad';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
 import { verifyAdminCode } from '../../services/api';
@@ -50,7 +51,8 @@ export default function AdminCodeHost() {
   const fresh = ask?.reason === 'reauth_required';
   return (
     <Modal visible={!!ask} transparent animationType="fade" onRequestClose={() => done(false)}>
-      <View style={styles.backdrop}>
+      {/* Lifted above the keyboard: on a small phone it covered the code box. */}
+      <KeyboardSheetPad style={styles.backdrop}>
         <View style={styles.card} testID="admin-reauth">
           <Ionicons name="shield-checkmark-outline" size={30} color="#FFC46B" />
           <Text style={styles.title}>{fresh ? t('admin.gate.confirmTitle') : t('admin.gate.codeTitle')}</Text>
@@ -60,7 +62,7 @@ export default function AdminCodeHost() {
             <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardSheetPad>
     </Modal>
   );
 }

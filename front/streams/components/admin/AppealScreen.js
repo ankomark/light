@@ -79,7 +79,7 @@ const AppealScreen = ({ navigation }) => {
               <Text style={styles.body}>{appeal.review_notes}</Text>
             </>
           ) : null}
-          {pending && <Text style={styles.hint}>A moderator will review your appeal soon.</Text>}
+          {pending && <Text style={styles.hint}>{t('appeal.pendingHint')}</Text>}
         </View>
       ) : (
         <View style={styles.card}>

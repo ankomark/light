@@ -6,6 +6,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, Modal, ScrollView,
 } from 'react-native';
+import KeyboardSheetPad from '../KeyboardSheetPad';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
@@ -281,7 +282,7 @@ export default function AdminQuizBank() {
       )}
 
       <Modal visible={!!ask} transparent animationType="slide" onRequestClose={() => setAsk(null)}>
-        <View style={styles.backdrop}>
+        <KeyboardSheetPad style={styles.backdrop}>
           <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: 28 }}
                       keyboardShouldPersistTaps="handled" testID="quiz-ask">
             <Text style={styles.sheetTitle}>{t('adminQuiz.draft.ask')}</Text>
@@ -314,11 +315,11 @@ export default function AdminQuizBank() {
               </>
             )}
           </ScrollView>
-        </View>
+        </KeyboardSheetPad>
       </Modal>
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
-        <View style={styles.backdrop}>
+        <KeyboardSheetPad style={styles.backdrop}>
           <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: 28 }}
                       keyboardShouldPersistTaps="handled" testID="quiz-editor">
             <Text style={styles.sheetTitle}>{draft?.id ? t('adminQuiz.edit') : t('adminQuiz.new')}</Text>
@@ -371,7 +372,7 @@ export default function AdminQuizBank() {
               </>
             )}
           </ScrollView>
-        </View>
+        </KeyboardSheetPad>
       </Modal>
     </View>
   );

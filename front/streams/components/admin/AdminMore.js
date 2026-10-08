@@ -21,12 +21,12 @@ const QuickLink = ({ icon, label, sub, onPress }) => (
   </TouchableOpacity>
 );
 
-// [capability (or 'super'), route, icon, string key]
+// [capability — or a list, any of which will do — (or 'super'), route, icon, string key]
 const TOOLS = [
   ['manage_notices', 'NoticeBoard', 'bulletin-board', 'notices'],
   ['broadcast', 'AdminBroadcast', 'bullhorn-outline', 'broadcast'],
   ['manage_security', 'AdminSecurity', 'shield-alert-outline', 'security'],
-  ['view_analytics', 'AdminMonitor', 'heart-pulse', 'monitor'],
+  [['view_analytics', 'manage_app', 'manage_security'], 'AdminMonitor', 'heart-pulse', 'monitor'],
   ['manage_app', 'AdminAppControl', 'toggle-switch-outline', 'app'],
   ['verify_accounts', 'AdminVerify', 'check-decagram-outline', 'verify'],
   ['review_singles', 'AdminSingles', 'ring', 'singles'],
@@ -44,7 +44,8 @@ const TOOLS = [
 export default function AdminMore({ navigation }) {
   const { t } = useI18n();
   const { can, superAdmin } = useAdminMe();
-  const tools = TOOLS.filter(([cap]) => (cap === 'super' ? superAdmin : can(cap)));
+  const tools = TOOLS.filter(([cap]) => (cap === 'super' ? superAdmin
+    : Array.isArray(cap) ? cap.some((c) => can(c)) : can(cap)));
 
   // Leave the admin tools: the admin session ends here and on the server.
   const signOutOfAdmin = async () => {

@@ -6,6 +6,7 @@ import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Modal, RefreshControl,
 } from 'react-native';
+import KeyboardSheetPad from '../KeyboardSheetPad';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
@@ -329,7 +330,7 @@ export default function AdminQuizCenter() {
       )}
 
       <Modal visible={!!pack} transparent animationType="slide" onRequestClose={() => setPack(null)}>
-        <View style={styles.backdrop}>
+        <KeyboardSheetPad style={styles.backdrop}>
           <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: 28 }}
                       keyboardShouldPersistTaps="handled" testID="pack-editor">
             <Text style={styles.sheetTitle}>{pack?.id ? t('adminQuizCenter.editPack') : t('adminQuizCenter.newPack')}</Text>
@@ -366,7 +367,7 @@ export default function AdminQuizCenter() {
               </>
             )}
           </ScrollView>
-        </View>
+        </KeyboardSheetPad>
       </Modal>
     </View>
   );

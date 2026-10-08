@@ -209,3 +209,18 @@ class GuardTests(APITestCase):
         r = self.client.post('/api/admin/security-centre/block/', {'network': '192.168.1.0/24', 'reason': 'x'},
                              format='json')
         self.assertEqual((r.status_code, r.data['code']), (400, 'internal'))
+
+
+class DashboardAttentionTests(APITestCase):
+    def test_security_admins_see_what_needs_them(self):
+        cache.clear()
+        from songs.models import RecoveryCase, Role
+        security.raise_event('password_guessing', 'x', ip='41.0.0.1', severity='high')
+        RecoveryCase.objects.create(account='mark', contact_email='m@x.com', details='help me please now')
+        boss = make('boss', admin_role='super_admin', is_superuser=True)
+        self.client.force_authenticate(boss)
+        attention = self.client.get('/api/admin/dashboard/').data['attention']
+        self.assertEqual(attention, {'security_events': 1, 'security_high': 1, 'recovery': 1})
+        mod = make('mod', role=Role.objects.create(name='Reports only', capabilities=['handle_reports']))
+        self.client.force_authenticate(mod)
+        self.assertIsNone(self.client.get('/api/admin/dashboard/').data['attention'])

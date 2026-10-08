@@ -151,6 +151,24 @@ export default function AdminDashboard({ navigation }) {
 
       {!!err && <View style={styles.err}><Text style={styles.errText}>{err}</Text></View>}
 
+      {/* What needs a security admin now: open attack events, people waiting
+          to get their account back. One tap to the Security centre. */}
+      {!!dash?.attention && (dash.attention.security_events > 0 || dash.attention.recovery > 0) && (
+        <TouchableOpacity
+          style={[styles.attention, dash.attention.security_high > 0 && styles.attentionHigh]}
+          onPress={() => navigation?.navigate?.('AdminSecurity')}
+          accessibilityRole="button"
+          testID="pulse-attention"
+        >
+          <Text style={styles.attentionText}>
+            {[
+              dash.attention.security_events > 0 ? t('adminPulse.securityEvents', { n: dash.attention.security_events }) : null,
+              dash.attention.recovery > 0 ? t('adminPulse.recoveryWaiting', { n: dash.attention.recovery }) : null,
+            ].filter(Boolean).join('  ·  ')}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {blank && (
         <View style={{ gap: 14 }} testID="pulse-skeleton">
           <View style={styles.rings}>
@@ -272,6 +290,9 @@ const styles = StyleSheet.create({
   periodTextOn: { color: PULSE.teal },
   err: { backgroundColor: 'rgba(255,122,89,0.12)', borderWidth: 1, borderColor: 'rgba(255,122,89,0.45)', borderRadius: 12, padding: 10 },
   errText: { color: PULSE.coral, fontSize: 13 },
+  attention: { padding: 14, borderRadius: 14, backgroundColor: 'rgba(255,181,71,0.14)', borderWidth: 1, borderColor: 'rgba(255,181,71,0.5)' },
+  attentionHigh: { backgroundColor: 'rgba(255,107,107,0.16)', borderColor: 'rgba(255,107,107,0.6)' },
+  attentionText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   rings: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   card: { backgroundColor: PULSE.card, borderWidth: 1, borderColor: PULSE.line, borderRadius: 18, padding: 18, gap: 12 },
   cardHead: { flexDirection: 'row', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' },

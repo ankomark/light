@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, Modal, TextInput, Pressable,
 } from 'react-native';
+import KeyboardSheetPad from '../KeyboardSheetPad';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -340,7 +341,7 @@ const AdminReports = () => {
 
       {/* Internal note editor */}
       <Modal visible={!!noteFor} transparent animationType="fade" onRequestClose={() => setNoteFor(null)}>
-        <View style={styles.noteBackdrop}>
+        <KeyboardSheetPad style={styles.noteBackdrop}>
           <View style={styles.noteCard}>
             <Text style={styles.noteTitle}>{t('admin.internalNote')}</Text>
             <TextInput
@@ -357,7 +358,7 @@ const AdminReports = () => {
               <TouchableOpacity style={styles.noteSave} onPress={saveNote}><Text style={styles.noteSaveText}>{t('common.save')}</Text></TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardSheetPad>
       </Modal>
     </View>
   );

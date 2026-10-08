@@ -6,9 +6,9 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator, Modal, ScrollView, Switch,
-  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import KeyboardSheetPad from '../KeyboardSheetPad';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useI18n } from '../../context/I18nContext';
@@ -167,7 +167,7 @@ export default function AdminPuzzleThemes() {
       )}
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => setDraft(null)}>
-        <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardSheetPad style={styles.backdrop}>
           <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: 28 + insets.bottom }}
                       keyboardShouldPersistTaps="handled" testID="theme-editor">
             <Text style={styles.sheetTitle}>{draft?.id ? t('adminPuzzle.edit') : t('adminPuzzle.new')}</Text>
@@ -253,7 +253,7 @@ export default function AdminPuzzleThemes() {
               </>
             )}
           </ScrollView>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
     </View>
   );
