@@ -10,7 +10,12 @@
 # NAME takes the newest.
 set -euo pipefail
 cd "$(dirname "$0")"
-set -a; . ./.env; set +a
+# Only the values these scripts need, read as plain text: .env is not shell
+# (a value like "Name <a@b.c>" or "https://<id>..." breaks `. ./.env`).
+envval() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//'; }
+API_DOMAIN=$(envval API_DOMAIN)
+POSTGRES_USER=$(envval POSTGRES_USER)
+POSTGRES_DB=$(envval POSTGRES_DB)
 DC="docker compose"
 
 # The backup's bytes on stdout - nothing else: the download goes to a file in

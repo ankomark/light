@@ -13,9 +13,9 @@
 name: adventlife
 
 x-app: &app
+  # One image for web, ws and worker: built once (by web), reused by the others.
   image: adventlife-api:latest
-  build:
-    context: ../../advent-backend
+  pull_policy: never
   env_file: .env
   restart: unless-stopped
   depends_on:
@@ -30,12 +30,16 @@ x-app: &app
 services:
   web:
     <<: *app
+    build:
+      context: ../../advent-backend
     command: ["gunicorn", "music.wsgi:application", "-c", "gunicorn.conf.py"]
     environment:
       # Only Caddy can reach web (no published port): trust its forwarded headers.
       FORWARDED_ALLOW_IPS: "*"
+    # Asked as if through Caddy (X-Forwarded-Proto): production mode sends a
+    # plain-http request to https, which the check would never reach.
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5).status == 200 else 1)"]
+      test: ["CMD", "python", "-c", "import urllib.request as u,sys; r=u.Request('http://127.0.0.1:8000/api/health/', headers={'X-Forwarded-Proto':'https'}); sys.exit(0 if u.urlopen(r, timeout=5).status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -23,8 +23,16 @@ while [ $# -gt 0 ]; do
 done
 
 [ -f .env ] || { echo ".env missing (cp app.env.example .env)"; exit 1; }
-set -a; . ./.env; set +a
+# Only the values these scripts need, read as plain text: .env is not shell
+# (a value like "Name <a@b.c>" or "https://<id>..." breaks `. ./.env`).
+envval() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//'; }
+API_DOMAIN=$(envval API_DOMAIN)
+POSTGRES_USER=$(envval POSTGRES_USER)
+POSTGRES_DB=$(envval POSTGRES_DB)
 DC="docker compose"
+# The classic builder: the newer "bake" one was seen to die (exit 143) after a
+# finished build.
+export COMPOSE_BAKE=false
 
 echo "== code ($BRANCH)"
 git -C ../.. fetch --quiet origin "$BRANCH"
@@ -53,7 +61,7 @@ $DC up -d --remove-orphans
 
 echo "== health"
 for i in $(seq 1 30); do
-  if $DC exec -T web python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5).status == 200 else 1)" 2>/dev/null; then
+  if $DC exec -T web python -c "import urllib.request as u,sys; r=u.Request('http://127.0.0.1:8000/api/health/', headers={'X-Forwarded-Proto':'https'}); sys.exit(0 if u.urlopen(r, timeout=5).status == 200 else 1)" 2>/dev/null; then
     echo "   web healthy"
     break
   fi

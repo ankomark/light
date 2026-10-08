@@ -6,7 +6,12 @@
 #   docker compose exec -T web python manage.py db_backup list
 set -euo pipefail
 cd "$(dirname "$0")"
-set -a; . ./.env; set +a
+# Only the values these scripts need, read as plain text: .env is not shell
+# (a value like "Name <a@b.c>" or "https://<id>..." breaks `. ./.env`).
+envval() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//'; }
+API_DOMAIN=$(envval API_DOMAIN)
+POSTGRES_USER=$(envval POSTGRES_USER)
+POSTGRES_DB=$(envval POSTGRES_DB)
 
 # pg_dump runs in the db container (the matching Postgres version); the bytes
 # stream straight into the uploader in the web container - no copy on disk.

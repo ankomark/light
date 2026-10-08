@@ -1,6 +1,24 @@
-# Deployment plan — Railway → Hetzner (self-hosted, incl. LiveKit)
+# Deployment plan — Hetzner (self-hosted, incl. LiveKit)
 
-Status: **draft / not started.** Written 2026-07-30.
+> **Status, 2026-10-08: ready to deploy; Railway is retired.**
+> - **The runbook is `deploy/app/README.md`** (the app box) and
+>   `deploy/livekit/README.md` (the live box, deployed later). This file is the
+>   reasoning behind them (sizing, costs, risks) and is kept for that.
+> - Railway is gone from the code: its hostnames, `RAILWAY_ENVIRONMENT`, the
+>   Procfile and the Railway runbooks (`DEPLOYMENT.md`, `REALTIME_DEPLOY.md`).
+>   Production mode is `DJANGO_ENV=production` only.
+> - The app no longer has a server address in its code: release builds take
+>   `EXPO_PUBLIC_API_BASE` from `eas.json` and refuse to build on the
+>   placeholder. **Installed copies built against the Railway address stop
+>   working once Railway is shut down** - a new build must ship first (§3).
+> - Done from §4 and §6-§7: settings host-neutral, `Dockerfile`, compose stack
+>   (Caddy, Gunicorn, Daphne, worker, Postgres 17, Redis), backups to a private
+>   R2 bucket with a monthly restore test, the job schedule, GitHub Actions
+>   deploy (tests first) and a manual migrate workflow. PgBouncer was left out:
+>   ~30 connections at launch fit Postgres' 100 (add it when scaling, §8).
+> - Load-tested in Docker (`advent-backend/loadtest/README.md`).
+
+Written 2026-07-30.
 
 Goal: move the Django backend and the LiveKit live-broadcast server off Railway
 onto two small Hetzner Cloud VPSes, at startup budget, sized for ~5,000
