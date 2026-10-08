@@ -15,9 +15,8 @@ import {
   TextInput,
   Switch,
   ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+  } from 'react-native';
+import KeyboardSheetPad from '../KeyboardSheetPad';
 import { Image } from 'expo-image';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -97,7 +96,7 @@ const QuickEdit = ({ product, onClose, onSaved, t }) => {
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={quick.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSheetPad style={quick.flex}>
       <TouchableOpacity style={quick.backdrop} activeOpacity={1} onPress={onClose}>
         <TouchableOpacity activeOpacity={1} style={quick.card}>
           <Text style={quick.title} numberOfLines={1}>{product.title}</Text>
@@ -115,7 +114,7 @@ const QuickEdit = ({ product, onClose, onSaved, t }) => {
           </TouchableOpacity>
         </TouchableOpacity>
       </TouchableOpacity>
-      </KeyboardAvoidingView>
+      </KeyboardSheetPad>
     </Modal>
   );
 };
@@ -144,7 +143,7 @@ const SellerDetails = ({ onClose, t, onSaved }) => {
   };
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={quick.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSheetPad style={quick.flex}>
       <TouchableOpacity style={quick.backdrop} activeOpacity={1} onPress={onClose}>
         <TouchableOpacity activeOpacity={1} style={quick.card}>
           <Text style={quick.title}>{t('market.seller.detailsTitle')}</Text>
@@ -170,7 +169,7 @@ const SellerDetails = ({ onClose, t, onSaved }) => {
           </TouchableOpacity>
         </TouchableOpacity>
       </TouchableOpacity>
-      </KeyboardAvoidingView>
+      </KeyboardSheetPad>
     </Modal>
   );
 };

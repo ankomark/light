@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, Alert,
-  ActivityIndicator, Linking, Modal, KeyboardAvoidingView, Platform,
-  TouchableWithoutFeedback, Keyboard, ScrollView, Image,
+  ActivityIndicator, Linking, Modal, TouchableWithoutFeedback, Keyboard, ScrollView, Image,
 } from 'react-native';
+import KeyboardSheetPad from '../components/KeyboardSheetPad';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { compressImage } from '../services/imageProcessing';
@@ -325,10 +325,7 @@ const AdventistMedia = () => {
         onRequestClose={closeForm}
         statusBarTranslucent
       >
-        <KeyboardAvoidingView
-          style={styles.modalRoot}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+        <KeyboardSheetPad style={styles.modalRoot}>
           <TouchableWithoutFeedback onPress={closeForm}>
             <View style={styles.backdrop} />
           </TouchableWithoutFeedback>
@@ -423,7 +420,7 @@ const AdventistMedia = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
     </View>
   );

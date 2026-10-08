@@ -791,8 +791,14 @@ class PostCommentViewSet(viewsets.ModelViewSet):
         post_id = self.kwargs.get('post_pk')
         if post_id:
             qs = qs.filter(post__id=post_id)
-        # A post you can't see has no readable comments either.
+        # A post you can't see has no readable comments either - by its own
+        # visibility, and by its author's: a private account's posts are
+        # hidden from those it hasn't approved, and so are the comments under
+        # them (they were readable by anyone, signed out included).
         qs = qs.filter(visible_posts_q(user, prefix='post__'))
+        private_authors = hidden_private_author_ids(user)
+        if private_authors:
+            qs = qs.exclude(post__user_id__in=private_authors)
         # Nor do you see comments from people you've blocked, or who blocked you.
         blocked = blocked_ids_for(user)
         if blocked:

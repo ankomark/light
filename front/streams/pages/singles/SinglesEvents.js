@@ -4,8 +4,8 @@
 // rooms; verified members can host one.
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Modal, Switch, KeyboardAvoidingView, Platform,
-} from 'react-native';
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Modal, Switch, } from 'react-native';
+import KeyboardSheetPad from '../../components/KeyboardSheetPad';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
@@ -133,7 +133,7 @@ function SuggestSheet({ visible, onClose, onDone }) {
   };
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.scrim} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardSheetPad style={styles.scrim}>
         <ScrollView style={styles.sheet} contentContainerStyle={{ gap: 10, paddingBottom: sheetPad }} keyboardShouldPersistTaps="handled">
           <Text style={styles.sheetTitle}>{t('singles.events.suggest')}</Text>
           <View style={styles.chips}>
@@ -164,7 +164,7 @@ function SuggestSheet({ visible, onClose, onDone }) {
             <GoldButton label={t('singles.events.send')} onPress={send} busy={busy} />
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSheetPad>
     </Modal>
   );
 }
@@ -182,7 +182,7 @@ function HostSheet({ visible, onClose, onLive }) {
   };
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.scrim} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardSheetPad style={styles.scrim}>
         <View style={[styles.sheet, { gap: 12, paddingBottom: sheetPad }]}>
           <Text style={styles.sheetTitle}>{t('singles.rooms.host')}</Text>
           <Body style={{ fontSize: 14 }}>{t('singles.rooms.hostLead')}</Body>
@@ -193,7 +193,7 @@ function HostSheet({ visible, onClose, onLive }) {
             <GoldButton label={t('singles.rooms.start')} icon="mic" onPress={go} busy={busy} disabled={!title.trim()} />
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSheetPad>
     </Modal>
   );
 }

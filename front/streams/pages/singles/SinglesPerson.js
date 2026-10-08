@@ -2,7 +2,8 @@
 // get-to-know-you game (both answer before either sees), telling your story
 // if it becomes one, and — always within reach — unmatch, report or block.
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, StyleSheet, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, StyleSheet, Modal } from 'react-native';
+import KeyboardSheetPad from '../../components/KeyboardSheetPad';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
@@ -173,7 +174,7 @@ function StorySheet({ visible, matchId, name, onClose }) {
   };
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.scrim} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardSheetPad style={styles.scrim}>
         <View style={[styles.sheet, { paddingBottom: sheetPad }]}>
           <Text style={styles.sheetTitle}>{t('singles.stories.tell')}</Text>
           <Body style={{ fontSize: 14 }}>{t('singles.stories.tellLead', { name })}</Body>
@@ -186,7 +187,7 @@ function StorySheet({ visible, matchId, name, onClose }) {
             <GoldButton label={t('singles.stories.send')} onPress={send} busy={busy} />
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSheetPad>
     </Modal>
   );
 }

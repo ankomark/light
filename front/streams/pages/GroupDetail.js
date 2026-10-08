@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ActivityIndicator, AppState, Modal,
+  ActivityIndicator, AppState, Modal,
   ScrollView, Pressable, useWindowDimensions, Animated, PanResponder,
 } from 'react-native';
+import KeyboardSheetPad from '../components/KeyboardSheetPad';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -2004,7 +2005,7 @@ const GroupDetail = ({ route, navigation }) => {
 
       {/* Join-question answer (shown to a requester when the group asks one) */}
       <Modal visible={joinAnswer !== null} transparent animationType="slide" onRequestClose={() => setJoinAnswer(null)} statusBarTranslucent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <KeyboardSheetPad style={{ flex: 1 }}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setJoinAnswer(null)}>
           <Pressable style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
@@ -2033,7 +2034,7 @@ const GroupDetail = ({ route, navigation }) => {
             </View>
           </Pressable>
         </Pressable>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
 
       <ChoiceSheet
@@ -2083,7 +2084,7 @@ const GroupDetail = ({ route, navigation }) => {
 
       {/* Admin: set/clear the join question */}
       <Modal visible={jqEditor !== null} transparent animationType="slide" onRequestClose={() => setJqEditor(null)} statusBarTranslucent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <KeyboardSheetPad style={{ flex: 1 }}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setJqEditor(null)}>
           <Pressable style={styles.sheetCard}>
             <View style={styles.sheetHandle} />
@@ -2108,7 +2109,7 @@ const GroupDetail = ({ route, navigation }) => {
             </View>
           </Pressable>
         </Pressable>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
     </View>
     </View>

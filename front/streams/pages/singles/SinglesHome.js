@@ -8,8 +8,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, ScrollView, RefreshControl, useWindowDimensions,
-  KeyboardAvoidingView, Platform,
-} from 'react-native';
+  } from 'react-native';
+import KeyboardSheetPad from '../../components/KeyboardSheetPad';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
@@ -370,7 +370,7 @@ export function FiltersSheet({ visible, value, onClose, onApply }) {
   const num = (k) => (text) => set(k, text.replace(/[^0-9]/g, '').slice(0, 3));
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardSheetPad style={{ flex: 1 }}>
       <TouchableOpacity style={styles.scrim} activeOpacity={1} onPress={onClose} accessibilityLabel={t('common.close')} />
       <View style={[styles.sheet, { paddingBottom: sheetPad }]} testID="singles-filters-sheet">
         <Title size={28}>{t('singles.filters.title')}</Title>
@@ -408,7 +408,7 @@ export function FiltersSheet({ visible, value, onClose, onApply }) {
           <GoldButton label={t('singles.filters.apply')} onPress={() => onApply(f)} testID="singles-filters-apply" />
         </View>
       </View>
-      </KeyboardAvoidingView>
+      </KeyboardSheetPad>
     </Modal>
   );
 }

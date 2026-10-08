@@ -6,8 +6,9 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Switch,
-  ActivityIndicator, RefreshControl, KeyboardAvoidingView, Platform, ScrollView,
+  ActivityIndicator, RefreshControl, ScrollView,
 } from 'react-native';
+import KeyboardSheetPad from '../components/KeyboardSheetPad';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -492,7 +493,7 @@ const NoticeBoard = ({ route, navigation }) => {
 
       {/* Compose (admins only) */}
       <Modal visible={composeVisible} animationType="slide" transparent onRequestClose={() => setComposeVisible(false)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <KeyboardSheetPad style={styles.modalOverlay}>
           <View style={[styles.modalSheet, { paddingBottom: spacing.md + insets.bottom }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
@@ -568,12 +569,12 @@ const NoticeBoard = ({ route, navigation }) => {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
 
       {/* Note to admins (any signed-in user) */}
       <Modal visible={noteVisible} animationType="slide" transparent onRequestClose={() => setNoteVisible(false)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <KeyboardSheetPad style={styles.modalOverlay}>
           <View style={[styles.modalSheet, { paddingBottom: spacing.md + insets.bottom }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
@@ -601,7 +602,7 @@ const NoticeBoard = ({ route, navigation }) => {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </KeyboardSheetPad>
       </Modal>
 
       {/* Admin inbox of received notes (admins only) */}
