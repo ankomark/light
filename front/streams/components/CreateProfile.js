@@ -14,6 +14,7 @@ import { uploadMedia } from '../services/cloudinary';
 import axios from 'axios';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import { parseDay, formatDay } from '../utils/calendarDay';
@@ -25,6 +26,7 @@ const looksLikeLink = (v) => /^(https?:\/\/)?[^\s/.]+\.[^\s]+$/i.test(v.trim());
 const FIELDS = ['display_name', 'website', 'bio', 'birth_date', 'location', 'picture'];
 
 const CreateProfile = () => {
+  const insets = useSafeAreaInsets();
   const { t } = useI18n();
   const navigation = useNavigation();
   const { updateUser, currentUser } = useAuth();
@@ -265,7 +267,7 @@ const CreateProfile = () => {
     <KeyboardLift scrollRef={kbScroll} style={{ flex: 1 }}>
     <ScrollView
       ref={kbScroll}
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.xl }]}
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.header}>{isEditMode ? t('createProfile.editTitle') : t('createProfile.completeTitle')}</Text>

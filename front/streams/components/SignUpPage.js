@@ -12,8 +12,10 @@ import { useAuth } from '../context/useAuth';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import { typography, spacing, radius, shadows } from '../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SignUpPage = () => {
+  const insets = useSafeAreaInsets();
   const [formData, setFormData] = useState({ username: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -92,7 +94,7 @@ const SignUpPage = () => {
     // window no longer resizes for the keyboard, which then covered the
     // password field and the button.
     <KeyboardLift scrollRef={kbScroll} style={styles.flex}>
-      <ScrollView ref={kbScroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={kbScroll} contentContainerStyle={[styles.container, { paddingTop: insets.top + spacing.xxl, paddingBottom: insets.bottom + spacing.xxl }]} keyboardShouldPersistTaps="handled">
         <Image source={require('../assets/logo-mark.png')} style={styles.logo} resizeMode="contain" />
 
         <Text style={styles.title}>{t('auth.createTitle')}</Text>

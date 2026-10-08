@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useLayoutEffect, useState } from '
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // expo-image: a follower list is mostly faces you've seen before (the feed,
 // comments, the inbox), so a shared memory+disk cache paints them instantly.
 import { Image } from 'expo-image';
@@ -50,6 +51,7 @@ const FollowRow = memo(({ item, isSelf, onOpen, onFollowChange }) => {
 FollowRow.displayName = 'FollowRow';
 
 const FollowList = () => {
+  const insets = useSafeAreaInsets();
   const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
@@ -196,7 +198,7 @@ const FollowList = () => {
       keyExtractor={(item) => `fl_${item.id}`}
       renderItem={renderItem}
       ListEmptyComponent={renderEmpty}
-      contentContainerStyle={rows.length === 0 ? styles.flexGrow : styles.listContent}
+      contentContainerStyle={[rows.length === 0 ? styles.flexGrow : styles.listContent, { paddingBottom: insets.bottom + 8 }]}
       refreshing={refreshing}
       onRefresh={() => load(true)}
       onEndReached={loadMore}

@@ -27,6 +27,9 @@ const HashtagScreen = ({ route, navigation }) => {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  // A failed load keeps what was shown and says so: wiping the list read as
+  // "no posts with this tag" on a weak network.
+  const [failed, setFailed] = useState(false);
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
 
@@ -41,8 +44,9 @@ const HashtagScreen = ({ route, navigation }) => {
       if (info) setCount(info.posts_count);
       setPosts(res?.results ?? (Array.isArray(res) ? res : []));
       hasMoreRef.current = !!res?.next;
+      setFailed(false);
     } catch {
-      setPosts([]);
+      setFailed(true);
     } finally {
       setLoading(false);
     }
@@ -115,7 +119,11 @@ const HashtagScreen = ({ route, navigation }) => {
             onEndReached={loadMore}
             onEndReachedThreshold={0.6}
             ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.spinnerSmall} color={colors.primary} /> : null}
-            ListEmptyComponent={<Text style={styles.empty}>{t('hashtag.empty')}</Text>}
+            ListEmptyComponent={failed ? (
+              <TouchableOpacity onPress={load} accessibilityRole="button" testID="hashtag-retry">
+                <Text style={styles.empty}>{t('common.somethingWrong')} · {t('common.retry')}</Text>
+              </TouchableOpacity>
+            ) : <Text style={styles.empty}>{t('hashtag.empty')}</Text>}
           />
         )}
       </SafeAreaView>

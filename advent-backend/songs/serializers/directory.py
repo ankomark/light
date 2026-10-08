@@ -475,14 +475,16 @@ class LiveEventSerializer(serializers.ModelSerializer):
         }
 
     def get_user(self, obj):
-        return UserSerializer(obj.user, context=self.context).data
+        # The light payload: the full UserSerializer carried the host's whole
+        # post history, and cost seven queries per event.
+        return SimpleUserSerializer(obj.user, context=self.context).data
 
     def get_embed_url(self, obj):
         return obj.get_embed_url()
 
     def get_is_owner(self, obj):
         request = self.context.get('request')
-        return request and obj.user == request.user
+        return bool(request and obj.user_id == getattr(request.user, 'id', None))
 
     def get_duration(self, obj):
         if obj.end_time:

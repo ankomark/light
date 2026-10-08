@@ -21,7 +21,8 @@ class MediaStationViewSet(viewsets.ModelViewSet):
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        qs = MediaStation.objects.filter(is_removed=False)
+        # The poster's name is on every row: fetched with them, not once each.
+        qs = MediaStation.objects.filter(is_removed=False).select_related('created_by')
         station_type = self.request.query_params.get('type')
         if station_type in ('TV', 'Radio', 'Podcast'):
             qs = qs.filter(type=station_type)
@@ -229,7 +230,8 @@ class AdminNoteViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def mine(self, request):
         """The notes I sent: read yet, and any answer."""
-        qs = AdminNote.objects.filter(sender=request.user).order_by('-created_at')
+        qs = (AdminNote.objects.filter(sender=request.user).select_related('sender', 'replied_by')
+              .order_by('-created_at'))
         page = self.paginate_queryset(qs)
         return self.get_paginated_response(self.get_serializer(page, many=True).data)
 
@@ -722,7 +724,7 @@ class LiveEventViewSet(viewsets.ModelViewSet):
                 Q(end_time__isnull=True, start_time__gte=twenty_four_hours_ago)
             )
         
-        return queryset.select_related('user')
+        return queryset.select_related('user__profile')
     
     def create(self, request, *args, **kwargs):
         """Enhanced create with comprehensive logging"""

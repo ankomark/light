@@ -153,7 +153,8 @@ class EmptyCorpusApiTests(APITestCase):
 
     def test_an_import_shows_at_once_after_an_empty_corpus(self):
         """The failure is not cached, so the import is not hidden for a day."""
-        self.assertEqual(self.client.get('/api/daily-verse/').status_code, 500)
+        r = self.client.get('/api/daily-verse/')
+        self.assertEqual((r.status_code, r.data['detail'].code), (503, 'not_ready'))   # not ready, not a crash
         seed_curated()
         self.assertEqual(self.client.get('/api/daily-verse/').status_code, status.HTTP_200_OK)
 

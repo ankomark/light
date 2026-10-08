@@ -8,9 +8,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { resetPassword, forgotPassword } from '../services/api';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../context/I18nContext';
 
 const ResetPasswordScreen = () => {
+  const insets = useSafeAreaInsets();
   const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
@@ -72,7 +74,7 @@ const ResetPasswordScreen = () => {
     // window no longer resizes for the keyboard, which then covered the
     // password field and the button.
     <KeyboardLift scrollRef={kbScroll} style={styles.flex}>
-      <ScrollView ref={kbScroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={kbScroll} contentContainerStyle={[styles.container, { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.xl }]} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>

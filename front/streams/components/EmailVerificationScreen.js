@@ -10,6 +10,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { apiRequest } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../context/I18nContext';
 
 const CODE_LENGTH = 6;
@@ -18,6 +19,7 @@ const verifyEmail = (code) => apiRequest('post', '/auth/verify-email/', { code }
 const resendCode = () => apiRequest('post', '/auth/resend-verification/');
 
 const EmailVerificationScreen = () => {
+  const insets = useSafeAreaInsets();
   const { t } = useI18n();
   const navigation = useNavigation();
   const route = useRoute();
@@ -109,7 +111,7 @@ const EmailVerificationScreen = () => {
     // window no longer resizes for the keyboard, which then covered the
     // password field and the button.
     <KeyboardLift scrollRef={kbScroll} style={styles.flex}>
-      <ScrollView ref={kbScroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={kbScroll} contentContainerStyle={[styles.container, { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.xl }]} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={styles.backBtn} onPress={handleExit}>
           <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
