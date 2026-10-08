@@ -1,0 +1,9 @@
+# Files that run or are read on Linux servers: always LF, whatever the
+# machine they were edited on (CRLF breaks bash, cron, Caddy and YAML there).
+*.sh text eol=lf
+deploy/** text eol=lf
+.github/** text eol=lf
+advent-backend/Dockerfile text eol=lf
+advent-backend/.dockerignore text eol=lf
+advent-backend/gunicorn.conf.py text eol=lf
+advent-backend/loadtest/** text eol=lf

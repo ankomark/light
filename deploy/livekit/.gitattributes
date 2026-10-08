@@ -1,2 +1,2 @@
-# Run on Linux: Windows line endings break bash and YAML there.
+# Run on Linux: Windows line endings break bash, cron and YAML there.
 * text eol=lf
