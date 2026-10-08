@@ -1,5 +1,5 @@
 """Gunicorn for the HTTP API (the websockets stay on Daphne: `ws` in the
-Procfile / docker compose, routed /ws/* by the proxy).
+deploy/app/docker-compose.yml, routed /ws/* by Caddy).
 
 Why not Daphne for everything: under ASGI, Django runs ordinary (sync) views
 one after another on a single thread per process. Every API view here is

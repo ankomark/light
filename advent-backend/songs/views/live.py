@@ -72,6 +72,19 @@ def _may_watch(user, b):
     return None
 
 
+def live_unavailable():
+    """None when live broadcasting can run; else the answer to give. The app
+    server goes out before the live server does (deploy/app, then
+    deploy/livekit): until LIVEKIT_URL and its keys are set, nobody can go
+    live or join - rather than a broadcast no phone could connect to, and a
+    push about it to every follower. A development server (DEBUG) and the
+    tests (LIVE_ALLOW_UNCONFIGURED) mint tokens without one."""
+    if lk.configured() or getattr(settings, 'LIVE_ALLOW_UNCONFIGURED', settings.DEBUG):
+        return None
+    return Response({'error': 'Live is unavailable right now. Try again in a minute.',
+                     'code': 'live_unavailable'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
 def _approved_single(user):
     from ..models import SinglesProfile
     from .. import singles
@@ -169,6 +182,9 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
 
     # ── Go live (host) ─────────────────────────────────────────────────────────
     def create(self, request):
+        off = live_unavailable()
+        if off:
+            return off
         kind = request.data.get('kind', 'meet')
         title = _clean_title(request.data.get('title'), 200)
         if kind not in dict(LiveBroadcast.KIND_CHOICES):
@@ -241,6 +257,9 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
     # ── Join (viewer) ──────────────────────────────────────────────────────────
     @action(detail=True, methods=['get'])
     def token(self, request, pk=None):
+        off = live_unavailable()
+        if off:
+            return off
         b = get_object_or_404(LiveBroadcast, pk=pk, is_removed=False)
         if b.status != 'live':
             return Response({'error': 'This broadcast has ended.', 'code': 'ended'}, status=status.HTTP_410_GONE)

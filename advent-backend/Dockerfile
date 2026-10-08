@@ -15,6 +15,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# ffmpeg: the worker processes songs (loudness, quality tiers, waveform) and
+# moves video indexes to the front. (Backups run pg_dump inside the database
+# container, which has the matching version.)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # psycopg2-binary and Pillow ship wheels; nothing to compile.
 COPY requirements.txt .
 RUN pip install -r requirements.txt

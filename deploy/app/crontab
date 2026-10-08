@@ -1,0 +1,32 @@
+# The app box's schedule -> /etc/cron.d/adventlife (setup.sh / deploy.sh install it).
+# Times are UTC; the app's day is Africa/Nairobi = UTC+3 all year (no DST).
+# Each line: minute hour day month weekday user command. Logs: /var/log/adventlife/jobs.log
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+J=/opt/adventlife/light/deploy/app/run-job.sh
+
+# ── All day ──────────────────────────────────────────────────────────────────
+# Trending posts/videos pre-computed so no request pays for it.
+*/15 *  * * *   deploy  $J manage refresh_trending
+# Expired stories (and their files) removed.
+7    *  * * *   deploy  $J manage cleanup_expired_stories
+
+# ── The day turns over (00:05 Nairobi) ───────────────────────────────────────
+# Today's and tomorrow's quizzes built before anyone asks; again before the
+# morning pushes in case the first run failed.
+5    21 * * *   deploy  $J manage build_daily_quiz
+30   1  * * *   deploy  $J manage build_daily_quiz
+
+# ── Nightly upkeep (02:30-03:30 Nairobi, the quietest hours) ─────────────────
+30   23 * * *   deploy  $J script backup.sh
+0    0  * * *   deploy  $J manage cleanup_watch_events
+10   0  * * *   deploy  $J manage cleanup_quiz_sessions
+20   0  * * *   deploy  $J manage cleanup_security
+# Monthly: restore last night's backup into a scratch database - proof it works.
+0    1  1 * *   deploy  $J script restore.sh --test
+
+# ── Morning pushes (each refuses outside 05:00-11:00 Nairobi) ────────────────
+0    3  * * *   deploy  $J manage send_weather_briefings     # 06:00 Nairobi
+30   3  * * *   deploy  $J manage send_verse_of_the_day      # 06:30
+0    4  * * *   deploy  $J manage admin_daily_summary        # 07:00, to the super admins
+30   4  * * *   deploy  $J manage send_quiz_reminders        # 07:30

@@ -62,3 +62,5 @@ SECURITY_BLOCKS = False
 LIVEKIT_URL = ''
 LIVEKIT_API_KEY = 'test-key'
 LIVEKIT_API_SECRET = 'test-secret-test-secret-test-secret-0'
+# Tokens are minted without a live server here (views/live.live_unavailable).
+LIVE_ALLOW_UNCONFIGURED = True

@@ -2,7 +2,7 @@
 
 Trending refreshes lazily on the first request after its cache expires, so this
 command is OPTIONAL — it just pre-warms the cache so no user request ever pays
-the compute. Wire it to a scheduler (e.g. Railway cron, every ~15 min) if you
+the compute. deploy/app/crontab runs it every 15 min if you
 want that:
 
     python manage.py refresh_trending

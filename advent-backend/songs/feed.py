@@ -8,7 +8,7 @@ Design (see also SocialPostViewSet.list): a 3-pool blend —
 with author diversity, then snapshotted per user so pagination stays stable and
 each scroll is almost free (one build per refresh, cache reads after).
 
-Cost profile on Railway: trending is a handful of queries per refresh window for
+Cost profile: trending is a handful of queries per refresh window for
 the WHOLE app; a user's blend is a few small queries once per refresh, then
 cache. No ML, no GPU — just arithmetic over already-denormalised counters.
 

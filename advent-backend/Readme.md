@@ -102,7 +102,7 @@ Phase 3 — Migrate historical assets
 
 Phase 4 — Decommission
 
-- After a retention window (old app versions gone, migration verified): remove cloudinary* packages, the signature endpoint, model imports, and Railway env vars; close the account.
+- After a retention window (old app versions gone, migration verified): remove cloudinary* packages, the signature endpoint and model imports; close the account.
 
 Suggested order of attack: the video-processing spike (Phase 2's risk) first, then Phases 0–1 together, since everything else is low-risk plumbing.
 

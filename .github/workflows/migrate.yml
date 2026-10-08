@@ -1,0 +1,29 @@
+# Apply database migrations on the app box - by hand only, never on a push.
+# Backs the database up to the private bucket first (deploy.sh --migrate),
+# then migrates and restarts. Give the "production" environment a required
+# reviewer (Settings -> Environments) so it always needs a second click.
+name: migrate
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-app
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH key and pinned host key
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "${{ secrets.HETZNER_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Back up, migrate, restart
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            deploy@${{ secrets.HETZNER_HOST }} \
+            "/opt/adventlife/light/deploy/app/deploy.sh --branch main --migrate"

@@ -1,0 +1,61 @@
+# Put the backend live on the Hetzner app box after the tests pass.
+#
+# On every push to main that touches the backend or its deploy files, and by
+# hand (Actions -> deploy-backend -> Run workflow). Migrations are never run
+# here unattended: when the new code needs them, deploy.sh stops before
+# restarting and says so - then run the "migrate" workflow (it backs up first).
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   HETZNER_HOST         the app box's address
+#   HETZNER_SSH_KEY      a deploy-only private key (its public half in
+#                        /home/deploy/.ssh/authorized_keys on the box)
+#   HETZNER_KNOWN_HOSTS  the box's host key: ssh-keyscan -t ed25519 <address>
+#                        (pinned, so a look-alike server is refused)
+name: deploy-backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'advent-backend/**'
+      - 'deploy/app/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-app
+  cancel-in-progress: false        # never two deploys at once, never one cut short
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: advent-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: python manage.py check --settings=music.settings_test
+      - run: python manage.py test songs --settings=music.settings_test
+
+  deploy:
+    needs: test                    # a red build never goes live
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: SSH key and pinned host key
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "${{ secrets.HETZNER_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Deploy
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            deploy@${{ secrets.HETZNER_HOST }} \
+            "/opt/adventlife/light/deploy/app/deploy.sh --branch main"

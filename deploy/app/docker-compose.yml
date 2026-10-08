@@ -1,0 +1,120 @@
+# The app box (Hetzner): everything but live broadcasting (deploy/livekit).
+#
+#   caddy   :80/:443   TLS, /ws/* -> ws, the rest -> web      (the only open ports)
+#   web     Gunicorn   the HTTP API                            (advent-backend/gunicorn.conf.py)
+#   ws      Daphne     websockets: group chat, DMs, battles
+#   worker  run_worker song/video processing, scheduled notices, exports
+#   db      Postgres 17 (data in the pgdata volume; backups: backup.sh)
+#   redis   cache, rate limits, sign-in locks, the websocket channel layer
+#
+# Settings: deploy/app/.env (from app.env.example; never committed).
+# Scheduled jobs: crontab (installed by setup.sh). Runbook: README.md.
+
+name: adventlife
+
+x-app: &app
+  image: adventlife-api:latest
+  build:
+    context: ../../advent-backend
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  logging: &logging
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }     # logs never fill the disk
+
+services:
+  web:
+    <<: *app
+    command: ["gunicorn", "music.wsgi:application", "-c", "gunicorn.conf.py"]
+    environment:
+      # Only Caddy can reach web (no published port): trust its forwarded headers.
+      FORWARDED_ALLOW_IPS: "*"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  ws:
+    <<: *app
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8001", "--proxy-headers", "music.asgi:application"]
+
+  worker:
+    <<: *app
+    command: ["python", "manage.py", "run_worker"]
+    stop_grace_period: 2m          # it finishes the job in hand on SIGTERM
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Sized for a CX33 (8 GB): a quarter of memory for Postgres' own cache,
+    # the rest left to the OS cache and the app.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=5GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=100
+      - -c
+      - random_page_cost=1.1       # SSD
+      - -c
+      - log_min_duration_statement=1000   # any query over 1 s goes in the log
+    shm_size: 256mb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+    logging: *logging
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    # Kept on disk (rate limits and locks survive a restart); when full, the
+    # least used cache keys go first.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+    logging: *logging
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on: [web, ws]
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"              # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

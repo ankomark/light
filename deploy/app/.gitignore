@@ -1,0 +1,4 @@
+# Secrets and machine-specific files: never committed.
+.env
+.env.*
+!app.env.example

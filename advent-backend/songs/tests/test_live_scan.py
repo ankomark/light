@@ -7,6 +7,7 @@ from datetime import timedelta
 from unittest import mock
 
 from django.core.cache import cache
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -155,3 +156,19 @@ class LiveServerDownTests(APITestCase):
         with override_settings(LIVEKIT_URL='wss://nowhere.invalid'), \
                 mock.patch('songs.livekit_service.asyncio.run', side_effect=OSError('down')):
             self.assertFalse(lk.ensure_room('r'))
+
+
+class LiveNotDeployedYetTests(APITestCase):
+    """The app server goes live before the live server: Go Live and joining
+    say 'unavailable' instead of making broadcasts no phone can reach."""
+
+    @override_settings(LIVEKIT_URL='', LIVE_ALLOW_UNCONFIGURED=False)
+    def test_no_live_server_no_broadcasts(self):
+        host = make('h9', admin_role='super_admin')
+        self.client.force_authenticate(host)
+        r = self.client.post('/api/live/broadcasts/', {'kind': 'meet', 'title': 'Prayer'}, format='json')
+        self.assertEqual((r.status_code, r.data['code']), (503, 'live_unavailable'))
+        self.assertFalse(LiveBroadcast.objects.exists())
+        b = LiveBroadcast.objects.create(host=host, kind='meet', title='x', room_name='bc_x')
+        r = self.client.get(f'/api/live/broadcasts/{b.id}/token/')
+        self.assertEqual(r.status_code, 503)

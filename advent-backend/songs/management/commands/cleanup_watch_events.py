@@ -5,7 +5,7 @@ Once they've fed the taste profile they have little value, so age them out on a
 schedule to keep the table lean. The taste profile only samples recent events
 (FEED_WATCH_SAMPLE_CAP), so pruning old ones doesn't change ranking.
 
-Run on a schedule (e.g. daily) via a Railway cron service or external scheduler:
+Run on a schedule (e.g. daily) (deploy/app/crontab runs it nightly):
 
     python manage.py cleanup_watch_events
     python manage.py cleanup_watch_events --days 30 --dry-run

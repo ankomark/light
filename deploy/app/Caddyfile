@@ -1,0 +1,46 @@
+# Caddy: HTTPS for the API (Let's Encrypt, renewed automatically), then
+#   /ws/*  -> ws:8001   (Daphne: group chat, DMs, battles)
+#   *      -> web:8000  (Gunicorn: the API, share pages /post/ /u/ /live/ ...)
+# API_DOMAIN and ACME_EMAIL come from .env.
+{
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	# Bigger bodies are refused here, before the app (the app also limits:
+	# 2 MB JSON, 30 MB uploads - songs and videos go straight to R2).
+	request_body {
+		max_size 32MB
+	}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+		-Via
+	}
+
+	@ws path /ws/*
+	handle @ws {
+		reverse_proxy ws:8001
+	}
+
+	handle {
+		reverse_proxy web:8000 {
+			# A slow phone uploading a picture is not a dead server.
+			transport http {
+				read_timeout 120s
+				write_timeout 120s
+			}
+		}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

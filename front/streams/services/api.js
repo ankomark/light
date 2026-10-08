@@ -7,7 +7,10 @@ import { extractYoutubeId } from '../utils/youtubeUtils';
 import { parseSpectrum } from '../utils/spectrum';
 import { adminToken, askForCode, clearAdminSession } from '../utils/adminSession';
 
-const PROD_API_BASE = 'https://web-production-f266.up.railway.app';
+// The production server's address comes with the build (eas.json:
+// EXPO_PUBLIC_API_BASE, checked by scripts/check-release-config.js), never
+// written here - the old platform's address is gone with it.
+const PROD_API_BASE = process.env.EXPO_PUBLIC_API_BASE || '';
 
 // In development, talk to the Django dev server on this machine. The host IP is
 // taken from Expo's packager URI (the same IP the device uses to reach Metro),

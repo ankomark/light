@@ -1,6 +1,7 @@
 """Lightweight fire-and-forget background execution.
 
-Railway has no Redis, so rather than a full Celery/RQ broker we offload
+Rather than a full Celery/RQ broker (the durable jobs have their own worker,
+run_worker), we offload
 non-critical, I/O-bound work (push notifications, transactional email) onto a
 small bounded thread pool. This keeps blocking SMTP/HTTP calls out of the
 request/response path without adding infrastructure.

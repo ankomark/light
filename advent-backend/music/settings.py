@@ -53,19 +53,10 @@ if not SECRET_KEY:
         )
 
 
-ALLOWED_HOSTS = [
-    'web-production-f266.up.railway.app',
-    '192.168.1.126',
-    '192.168.8.9',
-    'localhost',
-    '127.0.0.1',
-    '.railway.app',
-    '10.0.2.2'
-
-]
-
-# Hosts for the deploy target, comma-separated — e.g.
-# DJANGO_ALLOWED_HOSTS=api.example.com,.example.com
+# The server's own names come from DJANGO_ALLOWED_HOSTS (deploy/app/.env),
+# comma-separated - e.g. api.example.com. Local names are added for
+# development and the containers' own health checks.
+ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 ALLOWED_HOSTS += [h.strip() for h in os.getenv('DJANGO_ALLOWED_HOSTS', '').split(',') if h.strip()]
 
 # In development, accept requests from any device/emulator IP on the LAN so the
@@ -76,19 +67,15 @@ if DEBUG:
 # ── Production HTTPS hardening ────────────────────────────────────────────────
 # Gated to a real deploy so local dev — even running with DEBUG off against the
 # shared DB — never redirects to HTTPS or drops insecure cookies. Set
-# DJANGO_ENV=production on the server; RAILWAY_ENVIRONMENT is still honoured for
-# the legacy Railway deploy. A reverse proxy (nginx/Caddy on a VPS, or a platform
-# edge) terminates TLS and forwards the original scheme in X-Forwarded-Proto, so
+# DJANGO_ENV=production on the server. The reverse proxy (Caddy, deploy/app)
+# terminates TLS and forwards the original scheme in X-Forwarded-Proto, so
 # we trust that, then force HTTPS + HSTS and mark cookies secure. SSL redirect is
 # env-overridable in case a health check hits plain HTTP (DJANGO_SSL_REDIRECT=False).
 #
 # SECURITY: trusting X-Forwarded-Proto is only safe when the app is reachable
 # ONLY through the proxy. Bind gunicorn/daphne to 127.0.0.1 (or a private
 # network) so a client cannot connect directly and spoof that header.
-IS_PRODUCTION_DEPLOY = (
-    os.getenv('DJANGO_ENV', '').lower() == 'production'
-    or bool(os.getenv('RAILWAY_ENVIRONMENT'))
-)
+IS_PRODUCTION_DEPLOY = os.getenv('DJANGO_ENV', '').lower() == 'production'
 if IS_PRODUCTION_DEPLOY:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = os.getenv('DJANGO_SSL_REDIRECT', 'True') == 'True'
@@ -125,13 +112,13 @@ CORS_ALLOW_METHODS =[
 # mobile requests aren't subject to CORS; this guards the web build / API.)
 CORS_ALLOW_ALL_ORIGINS = False
 # Application definition
-CORS_ALLOWED_ORIGINS = [
-    'https://web-production-f266.up.railway.app',
-    "http://localhost:19006",
-    "http://192.168.1.126",  # Adjust for your network
-    "http://192.168.1.126:19006",  # Add port
-    "http://10.0.2.2:19006"        # For Android emulator
-
+# Browser origins allowed to call the API with credentials: in production only
+# what DJANGO_CORS_ORIGINS names (below); the web dev server and the Android
+# emulator are trusted only on a development machine.
+CORS_ALLOWED_ORIGINS = [] if IS_PRODUCTION_DEPLOY else [
+    'http://localhost:19006',
+    'http://localhost:8081',
+    'http://10.0.2.2:19006',     # Android emulator
 ]
 
 # Extra browser origins for the deploy target, comma-separated — e.g.
@@ -362,6 +349,9 @@ R2_SECRET_ACCESS_KEY = os.getenv('R2_SECRET_ACCESS_KEY', '')
 R2_BUCKET = os.getenv('R2_BUCKET', '')
 R2_ENDPOINT = os.getenv('R2_ENDPOINT', '')
 R2_PUBLIC_BASE = os.getenv('R2_PUBLIC_BASE', '')
+# Database backups (deploy/app/backup.sh): a SEPARATE, private bucket - never
+# the media bucket, which is public. Same R2 account and keys.
+BACKUP_R2_BUCKET = os.getenv('BACKUP_R2_BUCKET', '')
 
 # FFmpeg for song processing (songs/audio_processing.py, run by the job
 # worker). On the server: `apt install ffmpeg`. In development, the
@@ -462,7 +452,7 @@ FEED_CACHE_SECONDS = int(os.getenv('FEED_CACHE_SECONDS', '20'))
 
 # ── Channels / WebSockets ────────────────────────────────────────────────────
 # Realtime group chat. In production the channel layer is Redis (set REDIS_URL —
-# Railway provides one with its Redis plugin); locally / in tests it falls back
+# the Redis container in deploy/app); locally / in tests it falls back
 # to an in-process layer so no Redis is needed to run or test.
 ASGI_APPLICATION = 'music.asgi.application'
 if REDIS_URL:
@@ -560,7 +550,7 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# ── Email (set EMAIL_BACKEND=smtp in Railway to enable real sending) ──────────
+# ── Email (set EMAIL_BACKEND=smtp in deploy/app/.env to send for real) ───────
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
@@ -583,7 +573,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
 DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB
 
-# Log to stdout only (Railway captures it); level is env-tunable. No file
+# Log to stdout only (Docker keeps it, rotated - deploy/app); level is env-tunable. No file
 # handler — writing debug.log on every request fills disk and slows I/O.
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOGGING = {
