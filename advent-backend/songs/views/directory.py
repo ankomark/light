@@ -794,6 +794,22 @@ class LiveEventViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
     
+    def _owner_or_admin(self, event):
+        """Only the person who posted it - or an admin who may take content
+        down - changes or deletes a live event. Any signed-in member could
+        edit or delete anyone's before."""
+        if event.user_id != self.request.user.id and not admin_gate(
+                self.request, lambda u: u.has_capability('remove_content')):
+            raise PermissionDenied('Only the person who posted this can change it.')
+
+    def perform_update(self, serializer):
+        self._owner_or_admin(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._owner_or_admin(instance)
+        instance.delete()
+
     def perform_create(self, serializer):
         """Create with automatic thumbnail generation"""
         youtube_url = serializer.validated_data['youtube_url']
