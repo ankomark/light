@@ -167,7 +167,7 @@ rm /tmp/old.pgc
 
 ```bash
 curl -sI https://api.adventistlife.app/api/health/            # 200, and strict-transport-security
-docker compose exec -T web python manage.py send_test_email adventistlight145@gmail.com
+docker compose exec -T web python manage.py send_test_email adventistlight145@gmail.com  # first: the server IP approved in Brevo (below)
 ./backup.sh && ./restore.sh --test                   # a backup, and proof it restores
 tail -f /var/log/adventlife/jobs.log                 # the schedule (next quarter hour: trending)
 ```
@@ -268,6 +268,6 @@ the new values here.
 | "failed to execute bake: exit status 143" on build | build with `COMPOSE_BAKE=false` (deploy.sh does) |
 | Deploy stopped: "New migrations are waiting" | Actions → migrate, or `./deploy.sh --migrate` |
 | Uploads refused | `R2_PUBLIC_BASE` empty or wrong |
-| No verification emails | `EMAIL_*`; `docker compose exec -T web python manage.py send_test_email <you>` |
+| No verification emails | `EMAIL_*`; `docker compose exec -T web python manage.py send_test_email <you>`. `525 Unauthorized IP address`: add the server's IPs at app.brevo.com/security/authorised_ips. `535 Authentication failed`: the key is wrong - a Standard SMTP key (`xsmtpsib-`), not the account password or a Short key |
 | Morning pushes didn't come | `jobs.log`; the commands refuse outside 05:00-11:00 Nairobi |
 | Disk filling | `docker system prune` (old images); logs are capped at 100 MB a service |
