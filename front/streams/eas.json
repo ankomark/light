@@ -20,15 +20,15 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE": "https://api.YOUR-DOMAIN",
-        "EXPO_PUBLIC_PUBLIC_BASE": "https://api.YOUR-DOMAIN"
+        "EXPO_PUBLIC_API_BASE": "https://api.adventistlife.app",
+        "EXPO_PUBLIC_PUBLIC_BASE": "https://api.adventistlife.app"
       }
     },
     "production": {
       "env": {
         "APP_ENV": "production",
-        "EXPO_PUBLIC_API_BASE": "https://api.YOUR-DOMAIN",
-        "EXPO_PUBLIC_PUBLIC_BASE": "https://api.YOUR-DOMAIN"
+        "EXPO_PUBLIC_API_BASE": "https://api.adventistlife.app",
+        "EXPO_PUBLIC_PUBLIC_BASE": "https://api.adventistlife.app"
       },
       "android": {
         "buildType": "apk",

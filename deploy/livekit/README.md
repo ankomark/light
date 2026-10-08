@@ -10,13 +10,13 @@ Why our own server and why its own box: `deployplan.md` §1 and §5 (egress is
 Postgres).
 
 ```
- phone ──wss:// live.<domain>:443──► Caddy ──► LiveKit :7880   signalling
+ phone ──wss:// live.adventistlife.app:443──► Caddy ──► LiveKit :7880   signalling
  phone ──udp 50000-60000───────────────────► LiveKit           audio/video
  phone ──tcp 7881 ─────────────────────────► LiveKit           if UDP is blocked
- phone ──turn.<domain>:443 (TLS)──► Caddy ──► LiveKit TURN :5349   if only 443 works
+ phone ──turn.adventistlife.app:443 (TLS)──► Caddy ──► LiveKit TURN :5349   if only 443 works
  phone ──udp 3478 ─────────────────────────► LiveKit TURN      TURN over UDP
- LiveKit ──https webhook──► api.<domain>/api/live/webhook/     room ended, host left, viewer counts
- Django ──https api──► live.<domain>                           create/end rooms, remove people
+ LiveKit ──https webhook──► api.adventistlife.app/api/live/webhook/     room ended, host left, viewer counts
+ Django ──https api──► live.adventistlife.app                           create/end rooms, remove people
 ```
 
 ## Files
@@ -70,8 +70,8 @@ Inbound only — everything else closed (including 6379 Redis, 6789 metrics,
 
 Two **A records** pointing at the live box's IPv4:
 
-- `live.<domain>`
-- `turn.<domain>`
+- `live.adventistlife.app`
+- `turn.adventistlife.app`
 
 If DNS is on Cloudflare: **DNS only (grey cloud), never proxied.** Cloudflare's
 proxy does not carry WebRTC or TURN, and it would hide the box's address from
@@ -99,14 +99,14 @@ nano .env                 # domains, the key pair, WEBHOOK_URL, ACME_EMAIL
 docker compose logs -f caddy      # wait for both certificates to be issued
 ```
 
-`https://live.<domain>` in a browser should answer `OK`.
+`https://live.adventistlife.app` in a browser should answer `OK`.
 
 ## 6. Point Django at it (app box)
 
 In the app box's environment:
 
 ```
-LIVEKIT_URL=wss://live.<domain>
+LIVEKIT_URL=wss://live.adventistlife.app
 LIVEKIT_API_KEY=<the key>
 LIVEKIT_API_SECRET=<the secret>
 ```
@@ -135,7 +135,7 @@ phones behind carrier NAT and some block UDP, and those viewers depend on TURN.
    shows relayed connections — that's TURN doing its job.
 
 If B never connects on mobile data but does on Wi-Fi: check the UDP range in
-the firewall, then that `turn.<domain>` resolves to this box and its
+the firewall, then that `turn.adventistlife.app` resolves to this box and its
 certificate is issued.
 
 ## Running it

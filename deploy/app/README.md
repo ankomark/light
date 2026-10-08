@@ -5,7 +5,7 @@ Everything except live broadcasting, which gets its own server later
 and nothing else is affected.
 
 ```
-                     api.<domain>  (HTTPS, Let's Encrypt)
+                     api.adventistlife.app  (HTTPS, Let's Encrypt)
                             │
                 ┌─────────── Caddy ───────────┐
                 │ /ws/*                  else │
@@ -37,7 +37,7 @@ measured the speed of this layout.
 
 - [ ] **A domain**, and a DNS provider you can add records at (Cloudflare is fine).
 - [ ] **Cloudflare R2**: the media bucket (public, served from e.g.
-      `media.<domain>`), **and a second, private bucket for backups**, with an
+      `media.adventistlife.app`), **and a second, private bucket for backups**, with an
       API token that can write to both.
 - [ ] **Email sending** (SMTP): verification codes, password resets and security
       notices go by email. Any provider (Brevo, Mailgun, Zoho, SES…).
@@ -56,10 +56,39 @@ Hetzner Cloud → **Add server**:
 - **Firewall** (Hetzner → Firewalls → Create, attach to the server), inbound:
   TCP 22, TCP 80, TCP 443, UDP 443. Nothing else.
 
-## 2. DNS
+## 2. DNS (Cloudflare, adventistlife.app)
 
-An **A record** `api.<domain>` → the server's IPv4 (and an **AAAA** → its IPv6).
-On Cloudflare: **DNS only** (grey cloud) - the server does its own HTTPS.
+Cloudflare → adventistlife.app → **DNS → Records → Add record**:
+
+| Type | Name | Content | Proxy | When |
+|---|---|---|---|---|
+| A | `api` | the app server's IPv4 | **DNS only** (grey cloud) | now |
+| AAAA | `api` | the app server's IPv6 | **DNS only** | now |
+| A | `live` | the live server's IPv4 | **DNS only** | with deploy/livekit |
+| A | `turn` | the live server's IPv4 | **DNS only** | with deploy/livekit |
+
+**DNS only** matters: the servers get their own certificates (Caddy), and
+Cloudflare's proxy does not carry websockets the way the app needs them, nor
+any of the live server's traffic.
+
+**Media** (`media.adventistlife.app`): Cloudflare → R2 → the media bucket →
+Settings → **Custom Domains → Connect Domain** → `media.adventistlife.app`.
+Cloudflare makes that record itself (proxied - right for R2). Then
+`R2_PUBLIC_BASE=https://media.adventistlife.app` in `.env`. (The `r2.dev`
+address is rate-limited and not meant for production.) Already uploaded files
+keep their old `r2.dev` links, which go on working while the dev URL stays on.
+
+**Email**:
+- *Sending* (`noreply@adventistlife.app`): your SMTP provider (Brevo,
+  Mailgun, Zoho, SES…) lists the records to add - SPF (TXT), DKIM (TXT or
+  CNAME) and a DMARC TXT on `_dmarc`. Without them, codes land in spam.
+- *Receiving* (optional, free): Cloudflare → **Email → Email Routing** →
+  forward e.g. `support@adventistlife.app` to your Gmail. Then the app's
+  support address (`content/legal.js`, `pages/About.js`, `pages/Help.js`) can
+  become `support@adventistlife.app`.
+
+`.app` domains are HTTPS-only in every browser (HSTS preload): fine - nothing
+here is served over plain HTTP.
 
 ## 3. Set the server up (as root, once)
 
@@ -137,13 +166,13 @@ rm /tmp/old.pgc
 ## 7. Check it works
 
 ```bash
-curl -sI https://api.<domain>/api/health/            # 200, and strict-transport-security
-docker compose exec -T web python manage.py send_test_email you@example.com
+curl -sI https://api.adventistlife.app/api/health/            # 200, and strict-transport-security
+docker compose exec -T web python manage.py send_test_email adventistlight145@gmail.com
 ./backup.sh && ./restore.sh --test                   # a backup, and proof it restores
 tail -f /var/log/adventlife/jobs.log                 # the schedule (next quarter hour: trending)
 ```
 
-From a phone (a development build pointed at `https://api.<domain>`, or the
+From a phone (a development build pointed at `https://api.adventistlife.app`, or the
 release build of step 9): sign up, verify the email code, post a photo
 (R2 upload), comment, like, open a group and chat (websockets), play a song,
 open the Admin area (the authenticator code), get a push.
@@ -161,7 +190,7 @@ GitHub → Settings → Secrets and variables → Actions → New secret:
 
 | Secret | Value |
 |---|---|
-| `HETZNER_HOST` | the server's IP (or `api.<domain>`) |
+| `HETZNER_HOST` | the server's IP (or `api.adventistlife.app`) |
 | `HETZNER_SSH_KEY` | the contents of `deploy_key` (the private half) |
 | `HETZNER_KNOWN_HOSTS` | the `ssh-keyscan` line |
 
@@ -175,13 +204,13 @@ restarting and says so: run **Actions → migrate** (it backs up first).
 In `front/streams/eas.json`, `build.production.env` and `build.preview.env`:
 
 ```json
-"EXPO_PUBLIC_API_BASE": "https://api.<domain>",
-"EXPO_PUBLIC_PUBLIC_BASE": "https://api.<domain>"
+"EXPO_PUBLIC_API_BASE": "https://api.adventistlife.app",
+"EXPO_PUBLIC_PUBLIC_BASE": "https://api.adventistlife.app"
 ```
 
 A release build stops (`scripts/check-release-config.js`) while these are still
-the `YOUR-DOMAIN` placeholder. Over-the-air updates need the same values:
-`EXPO_PUBLIC_API_BASE=https://api.<domain> EXPO_PUBLIC_PUBLIC_BASE=https://api.<domain> eas update --branch production`.
+a placeholder (it is set: https://api.adventistlife.app). Over-the-air updates need the same values:
+`EXPO_PUBLIC_API_BASE=https://api.adventistlife.app EXPO_PUBLIC_PUBLIC_BASE=https://api.adventistlife.app eas update --branch production`.
 
 This release needs a **new native build** (not only an update): lock-screen
 controls, the verse widget, camera/mic permissions for Live, and the packages
@@ -234,7 +263,7 @@ the new values here.
 
 | Symptom | Look at |
 |---|---|
-| `https://api.<domain>` doesn't load | `docker compose logs caddy` - DNS must point here, ports 80/443 open (the certificate needs 80) |
+| `https://api.adventistlife.app` doesn't load | `docker compose logs caddy` - DNS must point here, ports 80/443 open (the certificate needs 80) |
 | 502 from Caddy | `docker compose logs web` - usually a setting in `.env`; `docker compose ps` |
 | "failed to execute bake: exit status 143" on build | build with `COMPOSE_BAKE=false` (deploy.sh does) |
 | Deploy stopped: "New migrations are waiting" | Actions → migrate, or `./deploy.sh --migrate` |
