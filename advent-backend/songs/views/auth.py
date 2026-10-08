@@ -239,7 +239,7 @@ class VerifyEmailView(APIView):
     throttle_scope = 'email_verify'
 
     def post(self, request):
-        code = request.data.get('code', '').strip()
+        code = str(request.data.get('code') or '').strip()[:20]
         if not code:
             return Response({'error': 'Code is required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -286,7 +286,7 @@ class ForgotPasswordView(APIView):
         from django.core.mail import send_mail
         from datetime import timedelta
 
-        email = request.data.get('email', '').strip()
+        email = str(request.data.get('email') or '').strip()[:254]
         if not email:
             return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -344,9 +344,10 @@ class ResetPasswordView(APIView):
     throttle_scope = 'password_reset'
 
     def post(self, request):
-        email = request.data.get('email', '').strip()
-        code = request.data.get('code', '').strip()
-        new_password = request.data.get('new_password', '')
+        # str(): a number or a list sent here was a 500, not a 400.
+        email = str(request.data.get('email') or '').strip()[:254]
+        code = str(request.data.get('code') or '').strip()[:20]
+        new_password = str(request.data.get('new_password') or '')
 
         if not all([email, code, new_password]):
             return Response({'error': 'email, code, and new_password are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -467,7 +468,8 @@ class ChangePasswordView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if not request.user.check_password(current):
-            return Response({'error': 'Current password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Current password is incorrect', 'code': 'wrong_password'},
+                            status=status.HTTP_400_BAD_REQUEST)
         try:
             validate_password(new_password, request.user)
         except DjangoValidationError as e:
@@ -534,7 +536,7 @@ class RevokeSessionView(APIView):
     def post(self, request):
         from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
         tid = request.data.get('id')
-        if not tid:
+        if not str(tid or '').isdigit():
             return Response({'error': 'id is required'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             ot = OutstandingToken.objects.get(id=tid, user=request.user)
@@ -762,7 +764,7 @@ class DeactivateAccountView(APIView):
         if not password:
             return Response({'error': 'password is required'}, status=status.HTTP_400_BAD_REQUEST)
         if not request.user.check_password(password):
-            return Response({'error': 'Password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Password is incorrect', 'code': 'wrong_password'}, status=status.HTTP_400_BAD_REQUEST)
         refused = _refuse_with_open_orders(request.user)
         if refused:
             return refused
@@ -787,7 +789,7 @@ class DeleteAccountView(APIView):
         if not password:
             return Response({'error': 'password is required to delete your account'}, status=status.HTTP_400_BAD_REQUEST)
         if not request.user.check_password(password):
-            return Response({'error': 'Password is incorrect'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Password is incorrect', 'code': 'wrong_password'}, status=status.HTTP_400_BAD_REQUEST)
         refused = _refuse_with_open_orders(request.user)
         if refused:
             return refused

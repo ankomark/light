@@ -1264,6 +1264,11 @@ class LikeViewSet(viewsets.ModelViewSet):
     serializer_class = LikeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def create(self, request, *args, **kwargs):
+        # Made through this viewset's own actions; a bare create had no user
+        # to save and crashed (500).
+        return Response({'error': 'Not available.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
     def get_queryset(self):
         return self.queryset.filter(user=self.request.user)
 

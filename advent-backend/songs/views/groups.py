@@ -1307,7 +1307,7 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         return qs
 
     @action(detail=True, methods=['post'], url_path='approve')
-    def approve_request(self, request, pk=None):
+    def approve_request(self, request, pk=None, **_):  # also reached nested under a group (group_slug)
         join_request = self.get_object()
         if not GroupMember.objects.filter(
             group=join_request.group, 
@@ -1347,7 +1347,7 @@ class GroupJoinRequestViewSet(viewsets.ModelViewSet):
         return Response({"status": "Request approved"}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='reject')
-    def reject_request(self, request, pk=None):
+    def reject_request(self, request, pk=None, **_):  # also reached nested under a group (group_slug)
         join_request = self.get_object()
         if not GroupMember.objects.filter(
             group=join_request.group, 

@@ -173,7 +173,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         if request.user.is_currently_suspended:
             return Response({'error': 'Your account is suspended.'}, status=status.HTTP_403_FORBIDDEN)
         other_id = request.data.get('user_id')
-        if not other_id:
+        if not str(other_id or '').isdigit():
             return Response({'error': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
         other_user = User.objects.filter(id=other_id, is_active=True, is_deactivated=False).first()
         if other_user is None:

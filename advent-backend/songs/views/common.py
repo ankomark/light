@@ -113,6 +113,15 @@ class IsNotSuspended(BasePermission):
         return not (u and u.is_authenticated and getattr(u, 'is_currently_suspended', False))
 
 
+class ContentNotReady(APIException):
+    """What this needs is not on the server yet (the Bible text not imported,
+    a puzzle theme with no words): 503 "not ready", not a 500 that reads as a
+    crash and floods the error reports."""
+    status_code = 503
+    default_detail = 'This is not ready yet. Try again later.'
+    default_code = 'not_ready'
+
+
 def admin_gate(request, allowed, recent=False):
     """True if the request may use the admin power `allowed(user)` grants:
     standing, the power read fresh, and a two-step admin session (a recent

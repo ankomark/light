@@ -629,7 +629,8 @@ const Settings = ({ route } = {}) => {
         ? t('settings.pw.changedSignedOut', { n: res.sessions_revoked })
         : t('settings.pw.changed'));
     } catch (error) {
-      Alert.alert(t('common.error'), error.response?.data?.error || t('settings.pw.changeFailed'));
+      Alert.alert(t('common.error'), error.response?.data?.code === 'wrong_password' ? t('settings.wrongPassword')
+        : error.response?.data?.error || t('settings.pw.changeFailed'));
     } finally {
       busy.current.pw = false;
       setChangingPw(false);
@@ -667,7 +668,8 @@ const Settings = ({ route } = {}) => {
     } catch (error) {
       if (refusedForOrders(error)) return;
       Alert.alert(t('common.error'), error.response?.status === 429
-        ? t('settings.tooManyTries') : error.response?.data?.error || t('settings.deleteAccountFailed'));
+        ? t('settings.tooManyTries') : error.response?.data?.code === 'wrong_password' ? t('settings.wrongPassword')
+          : error.response?.data?.error || t('settings.deleteAccountFailed'));
     } finally {
       busy.current.del = false;
       setDeleting(false);
@@ -691,7 +693,8 @@ const Settings = ({ route } = {}) => {
     } catch (error) {
       if (refusedForOrders(error)) return;
       Alert.alert(t('common.error'), error.response?.status === 429
-        ? t('settings.tooManyTries') : error.response?.data?.error || t('settings.deactivateFailed'));
+        ? t('settings.tooManyTries') : error.response?.data?.code === 'wrong_password' ? t('settings.wrongPassword')
+          : error.response?.data?.error || t('settings.deactivateFailed'));
     } finally {
       busy.current.deact = false;
       setDeactivating(false);

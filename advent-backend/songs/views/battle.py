@@ -51,7 +51,7 @@ class BattleViewSet(viewsets.GenericViewSet):
         try:
             battle = engine.create(request.user, request.data.get('title') or '', seconds, lang)
         except ValueError as exc:
-            raise APIException(str(exc))
+            raise ContentNotReady(str(exc))
         except engine.BattleRefused as exc:
             return _refused(exc)
         return Response(engine.state(battle, request.user), status=status.HTTP_201_CREATED)

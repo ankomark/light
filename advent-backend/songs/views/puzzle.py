@@ -239,7 +239,7 @@ class WordPuzzleViewSet(PuzzleSwitch, viewsets.GenericViewSet):
         except ValueError as exc:
             # The theme cannot supply enough words — a real failure, not an
             # undersized puzzle that still pays a completion bonus.
-            raise APIException(str(exc))
+            raise ContentNotReady(str(exc))
 
         puzzle._progress_cache = self._progress(puzzle, create=False)
         return Response({**self.get_serializer(puzzle).data, 'wallet': self._wallet(request.user)})
@@ -255,7 +255,7 @@ class WordPuzzleViewSet(PuzzleSwitch, viewsets.GenericViewSet):
         try:
             puzzle = next_puzzle(request.user, _language(request))
         except ValueError as exc:
-            raise APIException(str(exc))
+            raise ContentNotReady(str(exc))
 
         if not hasattr(puzzle, '_progress_cache'):
             puzzle._progress_cache = self._progress(puzzle, create=False)
@@ -387,7 +387,7 @@ class WordPuzzleViewSet(PuzzleSwitch, viewsets.GenericViewSet):
         try:
             puzzle = daily_puzzle(day, _language(request))
         except ValueError as exc:
-            raise APIException(str(exc))
+            raise ContentNotReady(str(exc))
         puzzle._progress_cache = self._progress(puzzle)
         return Response({**self.get_serializer(puzzle).data, 'wallet': self._wallet(request.user)})
 

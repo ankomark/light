@@ -88,7 +88,7 @@ def _quiz_for(day, language='en'):
         return generate_for_date(day, language=language)
     except ValueError as exc:
         # The corpus is empty or too thin — a real 503, not a broken quiz.
-        raise APIException(str(exc))
+        raise ContentNotReady(str(exc))
 
 
 def _read_answer(answers, question):
@@ -641,7 +641,7 @@ class DailyQuizViewSet(viewsets.GenericViewSet):
                 built = build_questions(_random.Random(_seed_for(day) + 104729), self.OFFLINE_MIX,
                                         corpus, famous=4, bank=False)
             except ValueError as exc:
-                raise APIException(str(exc))
+                raise ContentNotReady(str(exc))
             # Today's quiz exists before the pack is made, so none of its
             # verses can travel in the pack with their answers.
             for language in ('en', 'sw'):
@@ -776,7 +776,7 @@ class QuizSessionViewSet(viewsets.GenericViewSet):
                         raise ValidationError({'category': 'Choose one of: %s.' % ', '.join(CATEGORY_ORDER)})
                 session = start_session(request.user, mode, _language(request), category)
         except ValueError as exc:
-            raise APIException(str(exc))
+            raise ContentNotReady(str(exc))
         return Response(self.get_serializer(session).data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request, pk=None):
@@ -1022,7 +1022,7 @@ class DailyVerseView(APIView):
         if body is None:
             verse = verse_for_date(day)
             if not verse:
-                raise APIException('The Bible text has not been imported yet.')
+                raise ContentNotReady('The Bible text has not been imported yet.')
             body = {
                 'date': day.isoformat(),
                 'reference': verse.reference,

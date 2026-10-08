@@ -469,8 +469,10 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def upload_images(self, request, slug=None):
         logger.debug(f"Received image upload request for slug {slug}: {request.FILES}")
+        # Outside the catch-all below: a product that isn't there is a 404,
+        # not "the pictures couldn't be uploaded" (500).
+        product = self.get_object()
         try:
-            product = self.get_object()
             if product.seller != request.user:
                 return Response(
                     {"error": "You can only add images to your own products"},
@@ -533,6 +535,11 @@ class ProductCategoryViewSet(viewsets.ModelViewSet):
 class CartViewSet(viewsets.ModelViewSet):
     serializer_class = CartSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        # Made through this viewset's own actions; a bare create had no user
+        # to save and crashed (500).
+        return Response({'error': 'Not available.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def get_queryset(self):
         return Cart.objects.filter(user=self.request.user)
@@ -1200,6 +1207,11 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
 class WishlistViewSet(viewsets.ModelViewSet):
     serializer_class = WishlistSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        # Made through this viewset's own actions; a bare create had no user
+        # to save and crashed (500).
+        return Response({'error': 'Not available.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def get_queryset(self):
         return Wishlist.objects.filter(user=self.request.user)
