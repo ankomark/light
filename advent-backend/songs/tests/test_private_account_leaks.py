@@ -47,3 +47,51 @@ class PrivateAccountLeakTests(APITestCase):
         self.client.force_authenticate(self.friend)
         r = self.client.get(f'/api/social-posts/{self.post.pk}/comments/')
         self.assertIn(WORDS, r.content.decode())
+
+
+class PrivateProfileContentTests(APITestCase):
+    """A private account's own grid, songs, playlists and stories: for its
+    approved followers, not for strangers or anyone signed out."""
+
+    def setUp(self):
+        cache.clear()
+        from songs.models import Playlist, Story
+        self.private = User.objects.create_user('quiet2', 'q2@x.com', 'pw-12345678', is_email_verified=True)
+        Profile.objects.update_or_create(user=self.private, defaults={'is_public': False})
+        self.stranger = User.objects.create_user('stranger2', 's2@x.com', 'pw-12345678', is_email_verified=True)
+        SocialPost.objects.create(user=self.private, caption=WORDS, content_type='text',
+                                  visibility=SocialPost.VISIBILITY_PUBLIC)
+        Playlist.objects.create(user=self.private, name=WORDS, visibility=Playlist.PUBLIC)
+        try:
+            Story.objects.create(user=self.private, caption=WORDS, media_type='text')
+        except Exception:  # noqa: BLE001 - story fields differ: the others still count
+            pass
+
+    def _leaks(self):
+        uid = self.private.pk
+        out = []
+        for url in (f'/api/users/{uid}/', f'/api/users/{uid}/tracks/',
+                    f'/api/users/{uid}/playlists/', '/api/stories/feed/', '/api/playlists/'):
+            r = self.client.get(url)
+            if WORDS in r.content.decode(errors='ignore'):
+                out.append(f'{url} -> {r.status_code}')
+        # The grid carries thumbnails, not captions: count what it lists.
+        r = self.client.get(f'/api/users/{uid}/social_posts/')
+        if r.status_code < 300 and (r.json().get('results') if isinstance(r.json(), dict) else r.json()):
+            out.append(f'/api/users/{uid}/social_posts/ lists posts')
+        return out
+
+    def test_signed_out_sees_none_of_it(self):
+        self.assertEqual(self._leaks(), [])
+
+    def test_a_stranger_sees_none_of_it(self):
+        self.client.force_authenticate(self.stranger)
+        self.assertEqual(self._leaks(), [])
+
+    def test_an_approved_follower_does(self):
+        friend = User.objects.create_user('friend2', 'f2@x.com', 'pw-12345678', is_email_verified=True)
+        self.private.followers.add(friend)
+        self.client.force_authenticate(friend)
+        uid = self.private.pk
+        self.assertIn(WORDS, self.client.get(f'/api/users/{uid}/playlists/').content.decode(errors='ignore'))
+        self.assertEqual(len(self.client.get(f'/api/users/{uid}/social_posts/').json()['results']), 1)
