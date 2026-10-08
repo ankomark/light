@@ -176,7 +176,8 @@ class QuizApiTests(APITestCase):
         # After submitting, the truth is disclosed so the player can learn.
         for r in res.data['results']:
             self.assertIn('answer_index', r)
-            self.assertTrue(r['reference'])
+            # A verse to look up - or, for a whole-Bible fact, the explanation.
+            self.assertTrue(r['reference'] or r['explanation'])
 
     def test_unanswered_questions_are_not_credited(self):
         self.client.get('/api/quiz/today/')
@@ -394,7 +395,8 @@ class QuizEngineTests(APITestCase):
 
     def test_questions_carry_a_category(self):
         listing = self.client.get('/api/quiz/today/').data['questions']
-        self.assertTrue(all(q['category'] for q in listing), listing[0])
+        # Only a whole-Bible fact ("How many books…?") belongs to no section.
+        self.assertTrue(all(q['category'] or q['kind'] == 'fact' for q in listing), listing[0])
 
     def test_the_board_ranks_on_points_not_raw_correct(self):
         """Same number right; the faster, harder-won run ranks first."""

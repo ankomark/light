@@ -144,7 +144,9 @@ class StrengthAndHistoryTests(ProgressBase):
     def test_strengths_cover_every_answer_in_canon_order(self):
         questions = self._play_today()
         strengths = self.client.get('/api/quiz/progress/').data['strengths']
-        self.assertEqual(sum(s['answered'] for s in strengths), len(questions))
+        # A whole-Bible fact ("How many books…?") belongs to no section and is
+        # left out of strengths on purpose; some days draw one.
+        self.assertEqual(sum(s['answered'] for s in strengths), sum(1 for q in questions if q['category']))
         order = [s['category'] for s in strengths]
         self.assertEqual(order, sorted(order, key=CATEGORY_ORDER.index))
         for s in strengths:
