@@ -227,8 +227,8 @@ def notify_moderation(user, subject, message):
     site = getattr(settings, 'SITE_NAME', 'Adventist Life')
 
     def _send():
-        from django.core.mail import send_mail
-        send_mail(
+        from ..emails import send_branded_mail
+        send_branded_mail(
             subject=f"{site} — {subject}",
             message=f"Hi {user.username},\n\n{message}\n\n— {site} Team",
             from_email=settings.DEFAULT_FROM_EMAIL,

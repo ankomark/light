@@ -16,7 +16,7 @@ def _send_verification_email(user, background=False):
     reset) must stay synchronous; they cannot report what they did not wait for.
     """
     import secrets
-    from django.core.mail import send_mail
+    from ..emails import send_branded_mail
     from django.utils import timezone
     from datetime import timedelta
 
@@ -27,7 +27,7 @@ def _send_verification_email(user, background=False):
     EmailVerification.objects.create(user=user, code=code, expires_at=expires_at)
 
     def _send():
-        send_mail(
+        send_branded_mail(
             subject=f"{settings.SITE_NAME} — Verify your email",
             message=(
                 f"Hi {user.username},\n\n"
@@ -39,6 +39,7 @@ def _send_verification_email(user, background=False):
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
             fail_silently=False,
+            code=code,
         )
 
     if background:
@@ -283,7 +284,7 @@ class ForgotPasswordView(APIView):
 
     def post(self, request):
         import secrets
-        from django.core.mail import send_mail
+        from ..emails import send_branded_mail
         from datetime import timedelta
 
         email = str(request.data.get('email') or '').strip()[:254]
@@ -305,7 +306,7 @@ class ForgotPasswordView(APIView):
         # Send synchronously so a real SMTP failure surfaces to the user instead
         # of a false "code sent" (auth emails must be reliable, not fire-and-forget).
         try:
-            send_mail(
+            send_branded_mail(
                 subject=f"{settings.SITE_NAME} — Password Reset Code",
                 message=(
                     f"Hi {user.username},\n\n"
@@ -317,6 +318,7 @@ class ForgotPasswordView(APIView):
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
                 fail_silently=False,
+                code=code,
             )
         except Exception as exc:  # noqa: BLE001 — surface the real send failure
             logger.error("Password reset email failed for %s: %s", user.email, exc)

@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand, CommandError
-from django.core.mail import send_mail
+from songs.emails import send_branded_mail
 from django.conf import settings
 
 
@@ -18,12 +18,16 @@ class Command(BaseCommand):
         self.stdout.write(f"Sending to {recipient} ...")
 
         try:
-            sent = send_mail(
+            sent = send_branded_mail(
                 subject=f"{settings.SITE_NAME} — test email",
-                message="If you can read this, your email settings are working.",
+                message=("Hi there,\n\n"
+                         "If you can read this, your email settings are working.\n\n"
+                         "A code in a real email looks like this: 123456\n\n"
+                         f"— {settings.SITE_NAME} Team"),
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[recipient],
                 fail_silently=False,
+                code='123456',
             )
         except Exception as exc:  # noqa: BLE001 — surface the real SMTP error
             raise CommandError(f"Failed to send: {exc}")

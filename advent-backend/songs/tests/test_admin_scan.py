@@ -52,7 +52,7 @@ class TakedownSpeedTests(APITestCase):
         post = SocialPost.objects.create(user=author, content_type='image', caption='x')
         self.client.force_authenticate(admin)
         with mock.patch('songs.tasks.run_in_background') as bg, \
-                mock.patch('django.core.mail.send_mail') as send:
+                mock.patch('songs.emails.send_branded_mail') as send:
             r = self.client.post('/api/admin/content/remove/', {'type': 'post', 'id': post.pk, 'reason': 'spam!'},
                                  format='json')
         self.assertEqual(r.status_code, 200, r.content[:200])

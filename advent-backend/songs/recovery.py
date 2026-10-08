@@ -37,8 +37,8 @@ def security_email(to, subject, body, background=True):
         return
 
     def _send():
-        from django.core.mail import send_mail
-        send_mail(subject=f'{_site()} — {subject}', message=f'{body}\n\n— {_site()} Team',
+        from .emails import send_branded_mail
+        send_branded_mail(subject=f'{_site()} — {subject}', message=f'{body}\n\n— {_site()} Team',
                   from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[to], fail_silently=True)
     if background:
         from .tasks import run_in_background
@@ -50,18 +50,19 @@ def security_email(to, subject, body, background=True):
 def send_reset_code(user):
     """A new password-reset code to the account's email. Raises when the
     mail server refuses (the caller says so)."""
-    from django.core.mail import send_mail
+    from .emails import send_branded_mail
     from .models import PasswordResetCode
     from .views.auth import _reset_failures_key
     code = f'{secrets.randbelow(1000000):06d}'
     PasswordResetCode.objects.create(user=user, code=code, expires_at=timezone.now() + timedelta(minutes=15))
     cache.delete(_reset_failures_key(user))
-    send_mail(
+    send_branded_mail(
         subject=f'{_site()} — Password Reset Code',
         message=(f'Hi {user.username},\n\nYour password reset code is: {code}\n\n'
                  f'This code expires in 15 minutes.\n\n'
                  f"If you didn't request this, you can ignore this email.\n\n— {_site()} Team"),
         from_email=settings.DEFAULT_FROM_EMAIL, recipient_list=[user.email], fail_silently=False,
+        code=code,
     )
     return True
 

@@ -55,7 +55,7 @@ def api_paths():
 # Outside calls are not what is being tested: no pushes, mail, LiveKit, AI.
 @mock.patch('songs.push.send_expo_push', lambda *a, **k: None)
 @mock.patch('songs.livekit_service._run', lambda *a, **k: None)
-@mock.patch('django.core.mail.send_mail', lambda *a, **k: 1)
+@mock.patch('songs.emails.send_branded_mail', lambda *a, **k: 1)
 @mock.patch('rest_framework.throttling.ScopedRateThrottle.allow_request', return_value=True)
 @mock.patch('rest_framework.throttling.UserRateThrottle.allow_request', return_value=True)
 @override_settings(ANTHROPIC_API_KEY='')

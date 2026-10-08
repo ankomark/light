@@ -129,7 +129,7 @@ class ForgotPasswordPrivacyTests(APITestCase):
         from unittest import mock
         cache.clear()
         User.objects.create_user('member', 'member@x.com', 'oldpass123')
-        with mock.patch('django.core.mail.send_mail') as send:
+        with mock.patch('songs.emails.send_branded_mail') as send:
             known = self.client.post('/api/auth/forgot-password/', {'email': 'member@x.com'}, format='json')
             cache.clear()
             unknown = self.client.post('/api/auth/forgot-password/', {'email': 'nobody@x.com'}, format='json')
