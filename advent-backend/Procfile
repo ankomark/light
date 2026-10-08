@@ -1,2 +1,3 @@
-web: daphne -b 0.0.0.0 -p $PORT music.asgi:application
+web: gunicorn music.wsgi:application -c gunicorn.conf.py
+ws: daphne -b 0.0.0.0 -p ${WS_PORT:-8001} music.asgi:application
 worker: python manage.py run_worker

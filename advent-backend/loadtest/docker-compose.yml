@@ -1,0 +1,74 @@
+# A production-like stack on this machine, for load and security testing:
+# Postgres 17 + Redis 7 + the API under Daphne, DEBUG off. Its own database -
+# never the shared Supabase one (.dockerignore keeps .env out of the image).
+#
+#   docker compose -f loadtest/docker-compose.yml up -d --build
+#   docker compose -f loadtest/docker-compose.yml exec web python manage.py migrate
+#   docker compose -f loadtest/docker-compose.yml exec web python manage.py seed_loadtest
+#   python loadtest/measure.py           (from the host)
+#   docker compose -f loadtest/docker-compose.yml down -v   (throw it all away)
+
+name: streams-loadtest
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: streams
+      POSTGRES_USER: streams
+      POSTGRES_PASSWORD: loadtest-only
+    # Production-ish memory for a small box.
+    command: ["postgres", "-c", "shared_buffers=256MB", "-c", "work_mem=8MB", "-c", "max_connections=100"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streams -d streams"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+
+  web:
+    build: ..
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://streams:loadtest-only@db:5432/streams
+      DB_SSL_REQUIRE: "False"
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_DEBUG: "False"
+      DJANGO_ENV: loadtest
+      DJANGO_SECRET_KEY: loadtest-secret-key-not-for-production-0123456789
+      ADMIN_SECRET_KEY: loadtest-admin-key-not-for-production-0123456789
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,web
+      SENTRY_DSN: ""
+      LIVEKIT_URL: ""
+      ANTHROPIC_API_KEY: ""
+    ports:
+      - "127.0.0.1:8800:8000"     # this machine only
+
+  # Websockets (group chat, DMs, battles) on Daphne, as on the server.
+  ws:
+    build: ..
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8001", "music.asgi:application"]
+    depends_on:
+      - web
+    environment:
+      DATABASE_URL: postgres://streams:loadtest-only@db:5432/streams
+      DB_SSL_REQUIRE: "False"
+      REDIS_URL: redis://redis:6379/0
+      DJANGO_DEBUG: "False"
+      DJANGO_ENV: loadtest
+      DJANGO_SECRET_KEY: loadtest-secret-key-not-for-production-0123456789
+      ADMIN_SECRET_KEY: loadtest-admin-key-not-for-production-0123456789
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,ws
+    ports:
+      - "127.0.0.1:8801:8001"
+
+volumes:
+  pgdata:

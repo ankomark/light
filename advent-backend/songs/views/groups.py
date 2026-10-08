@@ -181,8 +181,10 @@ class GroupViewSet(viewsets.ModelViewSet):
         if scope in ('mine', 'archived'):
             if not user.is_authenticated:
                 return qs.none()
-            # Mine: what I haven't tucked away; archived: what I have.
-            return qs.filter(members__user=user, members__archived=(scope == 'archived')).distinct()
+            # Mine: what I haven't tucked away; archived: what I have. EXISTS,
+            # not a join: no duplicate rows to de-duplicate afterwards.
+            return qs.filter(Exists(GroupMember.objects.filter(
+                group=OuterRef('pk'), user=user, archived=(scope == 'archived'))))
         return qs
 
     def _apply_discovery_filters(self, qs):
@@ -254,11 +256,15 @@ class GroupViewSet(viewsets.ModelViewSet):
             if self.request.user.is_super_admin:
                 base = Group.objects.filter(is_removed=False).order_by('-created_at')
             else:
+                # Public, mine, or one I'm in. Membership as EXISTS, not a
+                # join: the join made a row per member of every group (4,700
+                # rows for 150 groups), each running the list's ~16
+                # sub-queries before .distinct() threw the copies away - 25
+                # seconds for one page with real volumes.
+                is_member = Exists(GroupMember.objects.filter(group=OuterRef('pk'), user=self.request.user))
                 base = Group.objects.filter(
-                    Q(is_private=False) |  # Show all public groups
-                    Q(creator=self.request.user) |  # Show groups user created
-                    Q(members__user=self.request.user)  # Show groups user is member of
-                ).filter(is_removed=False).distinct().order_by('-created_at')
+                    Q(is_private=False) | Q(creator=self.request.user) | Q(is_member)
+                ).filter(is_removed=False).order_by('-created_at')
             qs = self._annotate(
                 self._apply_scope(self._apply_discovery_filters(self._scope_to_kind(base)))
             )

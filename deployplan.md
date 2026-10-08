@@ -182,8 +182,8 @@ transparently re-hashes each one to Argon2 on that user's next successful login.
    api.yourdomain.com            live.yourdomain.com
    ── BOX A (CX33) ──            ── BOX B (CX23) ──
    Caddy  :443 TLS               LiveKit  :7880/:7881
-     └─ Daphne :8000             TURN     :3478 udp / :5349 tls
-        (HTTP + WebSockets)      media    :50000-60000 udp
+     ├─ Gunicorn :8000 (HTTP)    TURN     :3478 udp / :5349 tls
+     └─ Daphne  :8001 (/ws/*)    media    :50000-60000 udp
      PgBouncer :6432             Redis (local)
      Postgres 17
      Redis (channels + cache)
@@ -220,6 +220,22 @@ degradation rather than breakage. `REDIS_URL` must be set in production or the
 view-count dedupe becomes per-process (documented at `songs/views/social.py:33`).
 
 ---
+
+### HTTP on Gunicorn, websockets on Daphne (load-tested 2026-10-08)
+
+One Daphne process ran every (sync) API view one at a time: ~3 requests a
+second under 25 people. The API now runs on Gunicorn (`gunicorn.conf.py`,
+4 workers x 4 threads) and only `/ws/*` goes to Daphne. Caddy:
+
+```
+api.yourdomain.com {
+    handle /ws/* { reverse_proxy 127.0.0.1:8001 }
+    handle       { reverse_proxy 127.0.0.1:8000 }
+}
+```
+
+`Dockerfile` (in `advent-backend/`) builds both from one image; the Procfile
+has `web` and `ws`. See `advent-backend/loadtest/README.md` for the numbers.
 
 ## 6. Roadmap
 

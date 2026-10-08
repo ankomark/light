@@ -30,9 +30,12 @@ def own_upload(value, what='file'):
     A bare storage key isn't a link (media.resolve serves only absolute ones),
     so only an absolute link to anywhere else is refused."""
     value = (value or '').strip() if isinstance(value, str) else value
-    if (value and getattr(settings, 'R2_PUBLIC_BASE', '') and media.is_absolute(value)
-            and not r2.is_r2_url(value)):
-        raise serializers.ValidationError(f'Upload the {what} first.')
+    if value and media.is_absolute(value) and not r2.is_r2_url(value):
+        # Fails closed: with storage not configured (a deploy that forgot
+        # R2_PUBLIC_BASE), an outside link is refused too - only a local
+        # development server (DEBUG) lets them through, to work without R2.
+        if getattr(settings, 'R2_PUBLIC_BASE', '') or not settings.DEBUG:
+            raise serializers.ValidationError(f'Upload the {what} first.')
     return value
 
 

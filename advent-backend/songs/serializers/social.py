@@ -205,6 +205,15 @@ class SocialPostSerializer(serializers.ModelSerializer):
             return obj.saves.filter(user=request.user).exists()
         return False
 
+    # The app stops at 2,200 characters; the server did not, and stored a
+    # 12 MB caption sent straight to the API.
+    CAPTION_MAX = 2200
+
+    def validate_caption(self, value):
+        if value and len(value) > self.CAPTION_MAX:
+            raise serializers.ValidationError(f'Captions are at most {self.CAPTION_MAX} characters.')
+        return value
+
     def validate_media_file(self, value):
         return own_upload(value, 'photo or video')
 

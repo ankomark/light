@@ -1464,9 +1464,16 @@ class ExploreViewSet(viewsets.ViewSet):
                 .filter(is_removed=False).order_by('-created_at').values('id', 'name', 'description')[:fz.CANDIDATES]
             )
             ranked = fz.rank(query, cands, lambda g: [(g['name'], 1.0), (g['description'], 0.5)], limit=n)
-            by_id = Group.objects.in_bulk([g['id'] for _, g in ranked])
+            # The group list's own annotations (members, my role, unread, last
+            # message) in the one query: plain rows made the serializer look
+            # each up per group - ~10 queries a group, 130 for one search.
+            from .groups import GroupViewSet
+            gv = GroupViewSet()
+            gv.request = request
+            by_id = gv._annotate(Group.objects.filter(id__in=[g['id'] for _, g in ranked])).in_bulk()
+            gctx = {**ctx, 'hide_super_ids': gv._hidden_ids()}
             out['groups'] = GroupSerializer([by_id[g['id']] for _, g in ranked if g['id'] in by_id],
-                                            many=True, context=ctx).data
+                                            many=True, context=gctx).data
 
         # Books (Publishing): published, not taken down, by people you can
         # see — title first, then the author, then the summary.

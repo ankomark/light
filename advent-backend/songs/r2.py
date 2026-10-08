@@ -156,6 +156,21 @@ def is_r2_url(value):
     return bool(base) and isinstance(value, str) and value.startswith(base + '/')
 
 
+def is_ours(url):
+    """One of our own stored files: R2, or Cloudinary from older builds.
+    The only places the server itself downloads from."""
+    return isinstance(url, str) and (is_r2_url(url) or url.startswith('https://res.cloudinary.com/'))
+
+
+def require_ours(url):
+    """Refuse to fetch anything but our own storage. A stored media link the
+    server downloads (tags, video fast-start) must never become a way to make
+    the server fetch an outside or internal address (SSRF)."""
+    if not is_ours(url):
+        raise ValueError('not one of our stored files')
+    return url
+
+
 def key_from_url(url):
     """Extract the object key from one of our public URLs (else None)."""
     if not is_r2_url(url):

@@ -1,0 +1,14 @@
+# Never in an image: local secrets (.env points at the shared database),
+# local databases, the virtualenv, caches, test leftovers.
+.env
+.env.*
+*.sqlite3
+.venv/
+venv/
+**/__pycache__/
+*.pyc
+.git/
+media/
+staticfiles/
+test.*
+loadtest/results/

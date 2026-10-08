@@ -179,6 +179,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # Must be before any other middleware that uses request.is_secure()
     'django.middleware.security.SecurityMiddleware',
+    # Oversized bodies refused before anything reads them (DRF's JSON parser
+    # skips Django's own limit): songs/request_limits.py.
+    'songs.request_limits.RequestSizeLimitMiddleware',
     # Addresses an admin (or the attack rules) blocked: refused first thing.
     'songs.security.BlockMiddleware',
     # Requests per minute, errors and timings for the admins' Monitor (cache only).

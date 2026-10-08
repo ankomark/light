@@ -63,13 +63,18 @@ def index_first(head):
 
 
 def _head(url):
-    resp = requests.get(url, headers={'Range': f'bytes=0-{HEAD_BYTES - 1}'}, timeout=FETCH_TIMEOUT)
+    from . import r2
+    r2.require_ours(url)          # never an outside or internal address
+    resp = requests.get(url, headers={'Range': f'bytes=0-{HEAD_BYTES - 1}'}, timeout=FETCH_TIMEOUT,
+                        allow_redirects=False)
     resp.raise_for_status()
     return resp.content[:HEAD_BYTES]
 
 
 def _download(url, path):
-    with requests.get(url, timeout=FETCH_TIMEOUT, stream=True) as resp:
+    from . import r2
+    r2.require_ours(url)
+    with requests.get(url, timeout=FETCH_TIMEOUT, stream=True, allow_redirects=False) as resp:
         resp.raise_for_status()
         got = 0
         with open(path, 'wb') as fh:

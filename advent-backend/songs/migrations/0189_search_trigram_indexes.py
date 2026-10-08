@@ -22,6 +22,9 @@ FIELDS = [
     ('Group', 'name'), ('Group', 'description'),
     ('Publication', 'title'), ('Publication', 'summary'),
     ('Videostudio', 'name'), ('Videostudio', 'location'), ('Videostudio', 'description'),
+    # Post search matches caption OR location: an OR uses the indexes only
+    # when both sides have one (else it reads every post).
+    ('SocialPost', 'location'),
     ('SocialPost', 'caption'), ('SocialPost', 'tags'), ('Product', 'title'), ('Product', 'description'),
 ]
 

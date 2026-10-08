@@ -49,7 +49,9 @@ def _ext(url):
 
 
 def _fetch(url, cap):
-    resp = requests.get(url, timeout=FETCH_TIMEOUT, stream=True)
+    from . import r2
+    r2.require_ours(url)          # never an outside or internal address
+    resp = requests.get(url, timeout=FETCH_TIMEOUT, stream=True, allow_redirects=False)
     resp.raise_for_status()
     buf = io.BytesIO()
     for chunk in resp.iter_content(64 * 1024):
