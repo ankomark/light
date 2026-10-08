@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # How long a join token stays valid. A broadcast is expected to be shorter; the
 # client reconnects with a fresh token if needed.
 TOKEN_TTL = timedelta(hours=4)
+PUBLISH_SOURCES = ('camera', 'microphone')
 
 
 def create_access_token(*, identity, name, room, can_publish):
@@ -27,8 +28,14 @@ def create_access_token(*, identity, name, room, can_publish):
         room_join=True,
         room=room,
         can_publish=bool(can_publish),
+        # Camera and microphone only - no screen sharing from a co-host's
+        # phone (notifications, messages) to everyone watching.
+        can_publish_sources=list(PUBLISH_SOURCES) if can_publish else None,
         can_subscribe=True,
         can_publish_data=True,
+        # The name in chat is the one in this token (the username): nobody
+        # may rename themselves "pastor" mid-broadcast.
+        can_update_own_metadata=False,
     )
     token = (
         api.AccessToken(settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
@@ -113,6 +120,7 @@ def grant_publish(room_name, identity):
                 identity=str(identity),
                 permission=api.ParticipantPermission(
                     can_subscribe=True, can_publish=True, can_publish_data=True,
+                    can_publish_sources=[api.TrackSource.CAMERA, api.TrackSource.MICROPHONE],
                 ),
             ))
         finally:

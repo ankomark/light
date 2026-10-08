@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
-  useWindowDimensions,
+  useWindowDimensions, AppState,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,10 +18,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { lockPortrait, allowAllOrientations } from '../../utils/orientation';
 import Constants from 'expo-constants';
 import {
-  LiveKitRoom, AudioSession, useParticipants, useLocalParticipant, useRoomContext,
+  LiveKitRoom, AudioSession, AndroidAudioTypePresets, useParticipants, useLocalParticipant, useRoomContext,
   useTracks, VideoTrack,
 } from '@livekit/react-native';
-import { Track, RoomEvent, ConnectionState, DisconnectReason, setLogLevel } from 'livekit-client';
+import {
+  Track, RoomEvent, ConnectionState, DisconnectReason, VideoPresets, setLogLevel,
+} from 'livekit-client';
 import {
   endBroadcast, requestCohost, fetchCohostRequests, approveCohost, rejectCohost,
   fetchCohostToken, moderateBroadcast, followUser, reactBroadcast, setBroadcastOverlay,
@@ -36,6 +38,8 @@ import GraphicComposer from './GraphicComposer';
 import useKeyboardHeight from '../../hooks/useKeyboardHeight';
 import { useI18n } from '../../context/I18nContext';
 import ReportModal from '../ReportModal';
+import { keepAwake } from '../../utils/optionalNative';
+import { ensureLivePermissions } from '../../utils/livePermissions';
 
 // Quiet LiveKit's very chatty info/debug logging; keep genuine warnings/errors.
 setLogLevel('warn');
@@ -83,6 +87,35 @@ const decodeData = (u8) => {
 };
 
 const KIND_KEY = { meet: 'live.kindMeet', tv: 'live.kindTv' };
+// Not connected this long after opening: say so and offer to try again,
+// instead of "Connecting..." for ever (server down, a network that blocks it).
+const CONNECT_TIMEOUT_MS = 20000;
+const AWAKE_TAG = 'live-room';
+
+// Video for the networks we serve: the host sends 720p plus 360p and 180p
+// copies (simulcast), and the server gives each viewer the one their
+// connection carries. Audio gets redundancy (RED) and goes quiet between
+// words (DTX): fewer dropouts on lossy mobile data, less data used.
+const ROOM_OPTIONS = {
+  adaptiveStream: false,
+  dynacast: true,
+  videoCaptureDefaults: { resolution: VideoPresets?.h720?.resolution },
+  publishDefaults: {
+    simulcast: true,
+    videoSimulcastLayers: [VideoPresets?.h180, VideoPresets?.h360].filter(Boolean),
+    videoEncoding: VideoPresets?.h720?.encoding,
+    red: true,
+    dtx: true,
+  },
+};
+
+// A publishData that can fail without an unhandled promise rejection (it
+// rejects while reconnecting; try/catch alone only caught the sync throw).
+const sendData = (room, obj, reliable = true) => {
+  try {
+    Promise.resolve(room?.localParticipant?.publishData(encodeData(obj), { reliable })).catch(() => {});
+  } catch { /* not connected */ }
+};
 // Longest chat line drawn (the composer stops at 200 too; a hand-made
 // message could be any length and flood the dock).
 const CHAT_MAX = 200;
@@ -132,11 +165,39 @@ const LiveRoom = ({ navigation, route }) => {
   // Expo Go has no WebRTC native module — fail gracefully instead of crashing.
   const inExpoGo = Constants.executionEnvironment === 'storeClient';
 
+  // Audio as a call (echo cancelling) for those on stage; as media for those
+  // only watching - fuller sound, and the volume buttons change media volume
+  // rather than call volume. The loudspeaker unless headphones are in.
   useEffect(() => {
     if (inExpoGo) return undefined;
-    AudioSession.startAudioSession().catch(() => {});
-    return () => { AudioSession.stopAudioSession().catch(() => {}); };
+    let alive = true;
+    (async () => {
+      try {
+        await AudioSession.configureAudio?.({
+          android: {
+            preferredOutputList: ['bluetooth', 'headset', 'speaker'],
+            audioTypeOptions: canPublish ? AndroidAudioTypePresets?.communication : AndroidAudioTypePresets?.media,
+          },
+          ios: { defaultOutput: 'speaker' },
+        });
+      } catch { /* older native module: its defaults */ }
+      if (alive) AudioSession.startAudioSession().catch(() => {});
+    })();
+    return () => { alive = false; AudioSession.stopAudioSession().catch(() => {}); };
+  }, [inExpoGo, canPublish]);
+
+  // Keep the screen on: a phone that locks mid-broadcast stops the host's
+  // camera (and dims the viewer's video) after 30 seconds untouched.
+  useEffect(() => {
+    if (inExpoGo) return undefined;
+    const awake = keepAwake();
+    try { awake?.activateKeepAwakeAsync?.(AWAKE_TAG)?.catch?.(() => {}); } catch { /* no module */ }
+    return () => { try { awake?.deactivateKeepAwake?.(AWAKE_TAG); } catch { /* already off */ } };
   }, [inExpoGo]);
+
+  // Bumped by "Try again": a fresh connection.
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => { promotingRef.current = true; setAttempt((n) => n + 1); }, []);
 
   // The rest of the app is portrait-locked at the root. In the live room we switch
   // to full sensor rotation so the whole screen flips automatically with the
@@ -169,27 +230,33 @@ const LiveRoom = ({ navigation, route }) => {
       // livekit-client's connect() is a no-op while already connected. A fresh
       // mount establishes a new connection negotiated as a publisher (audio +
       // video), which is what lets a promoted co-host actually send video.
-      key={token}
+      key={`${token}:${attempt}`}
       serverUrl={url}
       token={token}
       connect
       audio={canPublish && (initialMicOn !== false)}
-      video={canPublish && isVideo && (initialCamOn !== false)}
+      // A co-host comes on stage with the camera off: it turns on when they
+      // choose, not the moment the host taps Approve.
+      video={canPublish && isVideo && role === 'host' && (initialCamOn !== false)}
       // adaptiveStream pauses remote video whose view isn't detected as visible
       // (flaky in RN ScrollViews), which hid late publishers' (co-hosts') video
       // from the host. A broadcast has few publishers, so subscribe fully.
-      options={{ adaptiveStream: false }}
-      onError={(e) => console.warn('LiveKit error', e)}
+      options={ROOM_OPTIONS}
+      onError={(e) => { if (__DEV__) console.warn('LiveKit error', e); }}
       onConnected={() => { promotingRef.current = false; }}
       onDisconnected={(reason) => {
         if (promotingRef.current) { promotingRef.current = false; return; } // promotion reconnect
+        // Leaving was my choice (Leave, End): nothing to explain.
+        const chose = leavingRef.current;
         leavingRef.current = true;
         // Say why, unless I left myself: before, the screen just vanished.
         const why = reason === DisconnectReason.ROOM_DELETED ? 'live.ended'
           : reason === DisconnectReason.PARTICIPANT_REMOVED ? 'live.removedYou'
             : reason === DisconnectReason.CLIENT_INITIATED || reason == null ? null
               : 'live.connectionLost';
-        if (why && initialRole !== 'host') Alert.alert(t('live.title'), t(why));
+        // The host too: an admin ending it, or the connection dying, used to
+        // close their screen without a word.
+        if (why && !chose) Alert.alert(t('live.title'), t(why));
         if (navigation.canGoBack?.() !== false) navigation.goBack();
       }}
       style={styles.root}
@@ -200,9 +267,10 @@ const LiveRoom = ({ navigation, route }) => {
         canPublish={canPublish}
         isVideo={isVideo}
         initialMicOn={initialMicOn !== false}
-        initialCamOn={isVideo && initialCamOn !== false}
+        initialCamOn={isVideo && role === 'host' && initialCamOn !== false}
         navigation={navigation}
         leavingRef={leavingRef}
+        onRetry={retry}
         onPromoted={(next) => {
           if (next && next !== token) { promotingRef.current = true; setToken(next); }
           setRole('cohost');
@@ -213,7 +281,7 @@ const LiveRoom = ({ navigation, route }) => {
 };
 
 const RoomInner = ({
-  broadcast, role, canPublish, isVideo, initialMicOn, initialCamOn, navigation, onPromoted, leavingRef,
+  broadcast, role, canPublish, isVideo, initialMicOn, initialCamOn, navigation, onPromoted, leavingRef, onRetry,
 }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -248,6 +316,16 @@ const RoomInner = ({
   // keep it live off the data channel.
   const [likeCount, setLikeCount] = useState(broadcast.like_count || 0);
   const pendingLikesRef = useRef(0); // this viewer's own ❤️ awaiting a server flush
+  // Hearts counted here and shown twice a second: one state update per heart
+  // re-rendered the whole room hundreds of times a second in a busy room.
+  const heardLikesRef = useRef(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const n = heardLikesRef.current;
+      if (n) { heardLikesRef.current = 0; setLikeCount((c) => c + n); }
+    }, 500);
+    return () => clearInterval(id);
+  }, []);
 
   // On-screen graphic (lower third / banner / name tag / ticker). One at a time.
   // Seeded from the persisted overlay so late joiners / reconnects keep it.
@@ -390,8 +468,16 @@ const RoomInner = ({
   useEffect(() => {
     if (!canPublish || !localParticipant) return;
     if (connState !== ConnectionState.Connected) return;
-    localParticipant.setMicrophoneEnabled(micOn).catch(() => {});
-    if (isVideo) localParticipant.setCameraEnabled(camOn).catch(() => {});
+    // A refusal (permission, the camera in use by another app) used to be
+    // swallowed: the button said on, nobody heard or saw anything.
+    localParticipant.setMicrophoneEnabled(micOn).catch(() => {
+      if (micOn) { setMicOn(false); Alert.alert(t('live.title'), t('live.micOffNow')); }
+    });
+    if (isVideo) {
+      localParticipant.setCameraEnabled(camOn).catch(() => {
+        if (camOn) { setCamOn(false); Alert.alert(t('live.title'), t('live.camOffNow')); }
+      });
+    }
     // micOn/camOn intentionally read at connect time, not in deps, so this fires
     // on (re)connect rather than on every toggle (toggles publish directly).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -419,7 +505,7 @@ const RoomInner = ({
           text,
           host: sender.identity === hostIdentity,
         });
-      } else if (msg.t === 'react') { reactionsRef.current?.add('❤️'); setLikeCount((c) => c + 1); }
+      } else if (msg.t === 'react') { reactionsRef.current?.add('❤️'); heardLikesRef.current += 1; }
       else if (msg.t === 'graphic') {
         // On-screen text only from those on stage: a viewer could otherwise
         // write over the broadcast for everyone.
@@ -442,7 +528,7 @@ const RoomInner = ({
       : { v: 1, t: 'graphic', visible: false };
     graphicRef.current = g || null;
     setGraphic(g || null);
-    try { room?.localParticipant?.publishData(encodeData(payload), { reliable: true }); } catch {}
+    sendData(room, payload);
     // Persist so it survives reconnects and reaches late joiners in the payload.
     setBroadcastOverlay(broadcast.id, g || null).catch(() => {});
   }, [room, broadcast.id]);
@@ -454,12 +540,7 @@ const RoomInner = ({
     const onJoin = () => {
       const g = graphicRef.current;
       if (!g) return;
-      try {
-        room.localParticipant.publishData(
-          encodeData({ v: 1, t: 'graphic', visible: true, style: g.style, title: g.title, sub: g.sub, x: g.x ?? null, y: g.y ?? null }),
-          { reliable: true },
-        );
-      } catch {}
+      sendData(room, { v: 1, t: 'graphic', visible: true, style: g.style, title: g.title, sub: g.sub, x: g.x ?? null, y: g.y ?? null });
     };
     room.on(RoomEvent.ParticipantConnected, onJoin);
     return () => { room.off(RoomEvent.ParticipantConnected, onJoin); };
@@ -474,14 +555,14 @@ const RoomInner = ({
     const m = { v: 1, t: 'chat', id: `${now}-${Math.random().toString(36).slice(2, 7)}`, name: myName, text, host: isHost };
     pushMessage({ id: m.id, name: m.name, text: m.text, host: m.host });
     setDraft('');
-    try { room?.localParticipant?.publishData(encodeData(m), { reliable: true }); } catch {}
+    sendData(room, m);
   }, [room, myName, pushMessage, isHost]);
 
   const sendReaction = useCallback(() => {
     reactionsRef.current?.add('❤️');
     setLikeCount((c) => c + 1);
     pendingLikesRef.current += 1;
-    try { room?.localParticipant?.publishData(encodeData({ v: 1, t: 'react', emoji: '❤️' }), { reliable: false }); } catch {}
+    sendData(room, { v: 1, t: 'react', emoji: '❤️' }, false);
   }, [room]);
 
   // ── host: poll co-host request inbox ─────────────────────────────────────--
@@ -524,24 +605,53 @@ const RoomInner = ({
   // When we become a co-host, the room reconnects publishing — reflect that in
   // the control state (mic on; camera on for video kinds).
   useEffect(() => {
-    if (role === 'cohost') { setMicOn(true); setCamOn(isVideo); }
-  }, [role, isVideo]);
+    if (role !== 'cohost') return;
+    setMicOn(true);
+    setCamOn(false);
+    Alert.alert(t('live.title'), t('live.onStage'));
+  }, [role, t]);
 
   // ── publisher controls ───────────────────────────────────────────────────--
   const toggleMic = async () => {
     const next = !micOn;
     try { await localParticipant?.setMicrophoneEnabled(next); setMicOn(next); }
-    catch (e) { if (__DEV__) Alert.alert(t('live.micFailed'), String(e?.message || e)); }
+    catch (e) {
+      Alert.alert(t('live.title'), t('live.micFailed'));
+      if (__DEV__) console.warn('mic', e);
+    }
   };
   const toggleCam = async () => {
     const next = !camOn;
+    // A co-host turning the camera on for the first time: ask for it now.
+    if (next && !(await ensureLivePermissions({ video: true, t }))) return;
     try {
-      await localParticipant?.setCameraEnabled(next);
+      await localParticipant?.setCameraEnabled(next, next ? { facingMode: facingRef.current } : undefined);
       setCamOn(next);
     } catch (e) {
-      if (__DEV__) Alert.alert(t('live.cameraPublishFailed'), String(e?.message || e));
+      Alert.alert(t('live.title'), t('live.cameraPublishFailed'));
+      if (__DEV__) console.warn('camera', e);
     }
   };
+
+  // Back from the background (a call, another app, the lock screen): Android
+  // and iOS stop the camera there, and the track does not come back by
+  // itself - the host returned to a black picture for everyone. Restart it.
+  const camOnRef = useRef(camOn);
+  camOnRef.current = camOn;
+  useEffect(() => {
+    if (!canPublish || !isVideo || !localParticipant) return undefined;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || !camOnRef.current) return;
+      const pub = localParticipant.getTrackPublication?.(Track.Source.Camera);
+      const vt = pub?.videoTrack || pub?.track;
+      const stopped = !vt || vt.mediaStreamTrack?.readyState === 'ended';
+      if (!stopped) return;
+      const again = () => localParticipant.setCameraEnabled(true).catch(() => {});
+      if (vt?.restartTrack) Promise.resolve(vt.restartTrack({ facingMode: facingRef.current })).catch(again);
+      else again();
+    });
+    return () => sub?.remove?.();
+  }, [canPublish, isVideo, localParticipant]);
   const flipCam = async () => {
     const next = facingRef.current === 'user' ? 'environment' : 'user';
     try {
@@ -586,6 +696,7 @@ const RoomInner = ({
     Alert.alert(t('live.endBroadcastTitle'), t('live.endBroadcastBody'), [
       { text: t('common.cancel'), style: 'cancel' },
       { text: t('live.end'), style: 'destructive', onPress: async () => {
+        if (leavingRef) leavingRef.current = true;   // the room closing is my doing
         try { await endBroadcast(broadcast.id); } catch {}
         leave();
       } },
@@ -602,6 +713,7 @@ const RoomInner = ({
       Alert.alert(t('live.leaveHostTitle'), t('live.leaveHostBody'), [
         { text: t('common.cancel'), style: 'cancel' },
         { text: t('live.end'), style: 'destructive', onPress: async () => {
+          if (leavingRef) leavingRef.current = true;
           try { await endBroadcast(broadcast.id); } catch {}
           leave();
           navigation.dispatch(e.data.action);
@@ -612,6 +724,9 @@ const RoomInner = ({
   }, [isHost, navigation, broadcast.id, t]);
 
   const askToJoin = async () => {
+    // On stage means speaking: the microphone is asked for before the host
+    // is, so an approval never lands on a phone that cannot be heard.
+    if (!(await ensureLivePermissions({ video: false, t }))) return;
     try { await requestCohost(broadcast.id); setRequested(true); startPromotionPoll(); }
     catch { Alert.alert(t('live.title'), t('live.requestFailed')); }
   };
@@ -635,6 +750,14 @@ const RoomInner = ({
   };
 
   const connecting = publishers.length === 0;
+
+  // Never connected after a while: say so, with Try again and Leave.
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (connState === ConnectionState.Connected) { setStuck(false); return undefined; }
+    const id = setTimeout(() => setStuck(true), CONNECT_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [connState]);
 
   // Host's pending co-host requests. Extracted so it can live in the main column
   // (portrait) or the side panel (landscape) without duplicating the markup.
@@ -728,7 +851,24 @@ const RoomInner = ({
     </View>
   ) : null;
 
-  const stageNode = connecting ? (
+  const stageNode = stuck ? (
+    <View style={[styles.connecting, styles.stuck, !landscape && styles.centerFill]} testID="live-stuck">
+      <MaterialCommunityIcons name="access-point-network-off" size={40} color={live.inkDim} />
+      <Text style={styles.connectingText}>{t('live.cantConnect')}</Text>
+      <View style={styles.stuckRow}>
+        <TouchableOpacity style={[styles.ctrlBtn, styles.stuckBtn]} onPress={() => { setStuck(false); onRetry?.(); }}
+          accessibilityRole="button" testID="live-retry">
+          <Text style={styles.ctrlText}>{t('live.tryAgain')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.ctrlBtn, styles.ctrlEnd, styles.stuckBtn]} onPress={() => {
+          if (leavingRef) leavingRef.current = true;
+          navigation.goBack();
+        }} accessibilityRole="button">
+          <Text style={styles.ctrlText}>{t('live.leave')}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  ) : connecting ? (
     <View style={[styles.connecting, !landscape && styles.centerFill]}>
       <ActivityIndicator color={live.gold} />
       <Text style={styles.connectingText}>{t('live.connecting')}</Text>
@@ -1079,6 +1219,9 @@ const styles = StyleSheet.create({
   speakerWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   connecting: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   connectingText: { ...typography.body, color: live.inkDim },
+  stuck: { flexDirection: 'column', gap: spacing.md, paddingHorizontal: spacing.lg },
+  stuckRow: { flexDirection: 'row', gap: spacing.sm, alignSelf: 'stretch' },
+  stuckBtn: { flex: 1 },
   speaker: { alignItems: 'center', width: 80, gap: 4 },
   speakerAvatar: {
     width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center',

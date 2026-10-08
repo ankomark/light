@@ -11,6 +11,7 @@ import { createBroadcast, fetchLiveEligibility } from '../../services/api';
 import { typography, spacing, radius } from '../../constants/theme';
 import { live, goldGlow } from '../../constants/liveTheme';
 import { useI18n } from '../../context/I18nContext';
+import { ensureLivePermissions } from '../../utils/livePermissions';
 
 // Module scope can't call t(); the hint key is resolved at render.
 const KINDS = [
@@ -113,10 +114,13 @@ const GoLive = ({ navigation, route }) => {
     } catch {}
   };
 
-  const goToLobby = () => {
+  const goToLobby = async () => {
     Keyboard.dismiss();
     if (title.trim().length < 3) { Alert.alert(t('live.goLive'), t('live.titleRequired')); return; }
     if (blockedReason) { Alert.alert(t('live.goLive'), blockedReason); return; }
+    // Camera (for video) and mic asked for here, with a way to Settings if
+    // refused for good - not discovered after going live, muted and black.
+    if (!(await ensureLivePermissions({ video: isVideo, t }))) return;
     setMicOn(true);
     setCamOn(isVideo);
     setStage('lobby');

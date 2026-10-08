@@ -35,6 +35,12 @@ jest.mock('expo-blur', () => {
   return { BlurView: ({ children, style }) => <V style={style}>{children}</V> };
 });
 jest.mock('expo-constants', () => ({ __esModule: true, default: { executionEnvironment: 'standalone' } }));
+let mockPerm = { granted: true };
+jest.mock('expo-camera', () => ({ Camera: {
+  requestMicrophonePermissionsAsync: () => Promise.resolve(mockPerm),
+  requestCameraPermissionsAsync: () => Promise.resolve(mockPerm),
+} }));
+jest.mock('../../../utils/optionalNative', () => ({ keepAwake: () => ({ activateKeepAwakeAsync: jest.fn(() => Promise.resolve()), deactivateKeepAwake: jest.fn() }) }));
 jest.mock('@livekit/react-native-webrtc', () => ({ mediaDevices: { getUserMedia: jest.fn(() => new Promise(() => {})) }, RTCView: () => null }));
 
 // ── LiveKit, as far as the room screen uses it ───────────────────────────────
@@ -57,7 +63,10 @@ jest.mock('@livekit/react-native', () => {
   const { View: V } = require('react-native');
   return {
     LiveKitRoom: ({ children }) => <V>{children}</V>,
-    AudioSession: { startAudioSession: () => Promise.resolve(), stopAudioSession: () => Promise.resolve() },
+    AudioSession: {
+      configureAudio: () => Promise.resolve(), startAudioSession: () => Promise.resolve(), stopAudioSession: () => Promise.resolve(),
+    },
+    AndroidAudioTypePresets: { communication: {}, media: {} },
     useParticipants: () => mockParticipants,
     useLocalParticipant: () => ({ localParticipant: mockLocal }),
     useRoomContext: () => mockRoom,
@@ -73,6 +82,7 @@ jest.mock('livekit-client', () => ({
   },
   ConnectionState: { Connected: 'connected', Reconnecting: 'reconnecting', SignalReconnecting: 'signal' },
   DisconnectReason: { CLIENT_INITIATED: 1, PARTICIPANT_REMOVED: 4, ROOM_DELETED: 5 },
+  VideoPresets: { h180: {}, h360: {}, h720: { resolution: {}, encoding: {} } },
   setLogLevel: () => {},
 }));
 jest.mock('../../../utils/orientation', () => ({ lockPortrait: jest.fn(), allowAllOrientations: jest.fn() }));
@@ -103,6 +113,7 @@ beforeEach(() => {
   Object.keys(mockApi).forEach((k) => delete mockApi[k]);
   mockUser = { id: 7, capabilities: [] };
   mockOnline = true;
+  mockPerm = { granted: true };
   mockRoom.handlers = {};
   mockParticipants = [mockHost, mockLocal];
 });
@@ -181,8 +192,23 @@ describe('Go Live', () => {
     const screen = render(<GoLive navigation={nav()} route={{ params: { title: 'Morning prayer' } }} />);
     await act(async () => {});
     expect(screen.queryByTestId('golive-blocked')).toBeNull();
-    fireEvent.press(screen.getByText('common.continue'));
+    await act(async () => { fireEvent.press(screen.getByText('common.continue')); });
     expect(screen.getByText('live.ready')).toBeTruthy();
+  });
+
+  test('camera or mic refused for good: offers Settings and stays put', async () => {
+    mockApi.fetchLiveEligibility.mockResolvedValue({ followers: 400, needed: { meet: 100, tv: 1000 }, allowed: { meet: true, tv: true } });
+    mockPerm = { granted: false, canAskAgain: false };
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const screen = render(<GoLive navigation={nav()} route={{ params: { title: 'Morning prayer', kind: 'tv' } }} />);
+    await act(async () => {});
+    await act(async () => { fireEvent.press(screen.getByText('common.continue')); });
+    const [title, body, buttons] = alert.mock.calls[0];
+    expect(title).toBe('live.permTitle');
+    expect(body).toContain('live.permBodyVideo');
+    expect(buttons.map((b) => b.text)).toContain('live.openSettings');
+    expect(screen.queryByText('live.ready')).toBeNull();
+    alert.mockRestore();
   });
 });
 
@@ -213,6 +239,36 @@ describe('Live room chat', () => {
     expect(screen.queryByTestId('graphic')).toBeNull();
     send({ t: 'graphic', visible: true, style: 'banner', title: 'Psalm 23' }, mockHost);
     expect(screen.getByTestId('graphic').props.children).toBe('Psalm 23');
+  });
+
+  test('not connected after a while: says so and offers to try again', () => {
+    jest.useFakeTimers();
+    try {
+      const prev = mockRoom.state;
+      mockRoom.state = 'connecting';
+      const screen = open();
+      expect(screen.queryByTestId('live-stuck')).toBeNull();
+      act(() => { jest.advanceTimersByTime(21000); });
+      expect(screen.getByTestId('live-stuck')).toBeTruthy();
+      fireEvent.press(screen.getByTestId('live-retry'));
+      expect(screen.queryByTestId('live-stuck')).toBeNull();
+      mockRoom.state = prev;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('asking to join needs the microphone first', async () => {
+    mockPerm = { granted: false, canAskAgain: true };
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const screen = open();
+    await act(async () => { fireEvent.press(screen.getByText('live.requestToJoin')); });
+    expect(mockApi.requestCohost).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledWith('live.permTitle', 'live.permBodyAudio', expect.any(Array));
+    mockPerm = { granted: true };
+    await act(async () => { fireEvent.press(screen.getByText('live.requestToJoin')); });
+    expect(mockApi.requestCohost).toHaveBeenCalledWith(3);
+    alert.mockRestore();
   });
 
   test('a long chat line is cut, and one with no sender is ignored', () => {

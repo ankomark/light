@@ -284,3 +284,34 @@ class LiveWebhookTests(APITestCase):
         self._post_event('participant_left', num_participants=3, identity='u99999')
         self.b.refresh_from_db()
         self.assertEqual(self.b.status, 'live')
+
+    def test_someone_removed_who_comes_back_on_an_old_token_is_put_out_again(self):
+        gone = User.objects.create_user('gone', 'g@x.com', 'x')
+        CoHostRequest.objects.create(broadcast=self.b, user=gone, status='removed')
+        with mock.patch('songs.views.live.lk.remove_participant') as remove:
+            self._post_event('participant_joined', num_participants=2, identity=f'u{gone.id}')
+        remove.assert_called_once_with(self.b.room_name, f'u{gone.id}')
+
+    def test_a_welcome_viewer_and_the_host_are_left_alone(self):
+        fine = User.objects.create_user('fine', 'f@x.com', 'x')
+        with mock.patch('songs.views.live.lk.remove_participant') as remove:
+            self._post_event('participant_joined', num_participants=2, identity=f'u{fine.id}')
+            self._post_event('participant_joined', num_participants=2, identity=f'u{self.host.id}')
+            self._post_event('participant_joined', num_participants=2, identity='EG_recorder')
+        remove.assert_not_called()
+
+
+@override_settings(LIVEKIT_API_KEY='devkey', LIVEKIT_API_SECRET=SECRET, LIVEKIT_URL='')
+class LiveTokenGrantTests(APITestCase):
+    def _grants(self, can_publish):
+        from songs import livekit_service as lk
+        token = lk.create_access_token(identity='u1', name='pastor', room='r', can_publish=can_publish)
+        return pyjwt.decode(token, SECRET, algorithms=['HS256'])['video']
+
+    def test_publishers_send_camera_and_mic_only_and_nobody_renames_themselves(self):
+        g = self._grants(True)
+        self.assertEqual(g['canPublishSources'], ['camera', 'microphone'])   # no screen share
+        self.assertFalse(g['canUpdateOwnMetadata'])
+        g = self._grants(False)
+        self.assertFalse(g.get('canPublish'))
+        self.assertFalse(g['canUpdateOwnMetadata'])

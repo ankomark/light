@@ -474,7 +474,28 @@ class LiveKitWebhookView(APIView):
                 # and viewers aren't stranded in a frozen broadcast.
                 if event.event == 'participant_left':
                     self._end_if_host_left(room_name, event)
+                else:
+                    self._refuse_if_unwelcome(room_name, event)
         return Response({'ok': True})
+
+    @staticmethod
+    def _refuse_if_unwelcome(room_name, event):
+        """Someone removed (or blocked by the host) is refused a new token, but
+        the one they hold stays good for hours: back in a tap, or by the app's
+        own reconnect. LiveKit tells us they joined; we put them out again."""
+        identity = getattr(getattr(event, 'participant', None), 'identity', '') or ''
+        if not identity.startswith('u') or not identity[1:].isdigit():
+            return
+        user_id = int(identity[1:])
+        b = LiveBroadcast.objects.filter(room_name=room_name).select_related('host').first()
+        if b is None or user_id == b.host_id:
+            return
+        from ..models import Block
+        removed = CoHostRequest.objects.filter(broadcast=b, user_id=user_id, status='removed').exists()
+        blocked = Block.objects.filter(Q(blocker_id=b.host_id, blocked_id=user_id)
+                                       | Q(blocker_id=user_id, blocked_id=b.host_id)).exists()
+        if removed or blocked:
+            lk.remove_participant(room_name, identity)
 
     @staticmethod
     def _end_if_host_left(room_name, event):

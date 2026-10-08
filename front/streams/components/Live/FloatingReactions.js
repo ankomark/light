@@ -10,6 +10,9 @@ import React, {
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 let _seq = 0;
+// Fewest ms between two floating hearts: a busy room sends hundreds a
+// second, and drawing each one re-rendered this layer every time.
+const MIN_GAP_MS = 70;
 
 const Heart = ({ emoji, onDone }) => {
   const t = useRef(new Animated.Value(0)).current;
@@ -41,8 +44,12 @@ const Heart = ({ emoji, onDone }) => {
 
 const FloatingReactions = forwardRef((_props, ref) => {
   const [items, setItems] = useState([]);
+  const lastRef = useRef(0);
 
   const add = useCallback((emoji = '❤️') => {
+    const now = Date.now();
+    if (now - lastRef.current < MIN_GAP_MS) return;   // the count still counts it
+    lastRef.current = now;
     const id = ++_seq;
     setItems((prev) => [...prev.slice(-24), { id, emoji }]); // cap so a spam burst can't grow unbounded
   }, []);
