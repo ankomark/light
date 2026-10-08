@@ -84,6 +84,30 @@ def is_internal(ip):
     return addr.is_private or addr.is_loopback or addr.is_link_local
 
 
+# A mobile network in Kenya puts thousands of people behind one public
+# address (carrier NAT). Such an address shows many different people signing
+# in successfully; blocking it would shut all of them out, and counting its
+# sign-ups would pause a whole network's. These many established accounts,
+# signed in from it in the last day, mark it as shared.
+SHARED_ACCOUNTS = 3
+
+
+def is_shared(ip):
+    """Whether many different people use this address (carrier NAT, a
+    church's Wi-Fi): the rules raise an event for it, never block it."""
+    if not ip:
+        return False
+    key = f'security:shared:{ip}'
+    known = cache.get(key)
+    if known is None:
+        from .models import LoginAttempt
+        since = timezone.now() - timedelta(days=1)
+        known = (LoginAttempt.objects.filter(ip=ip, outcome=LoginAttempt.OK, created_at__gte=since)
+                 .values('user').distinct().count() >= SHARED_ACCOUNTS)
+        cache.set(key, known, 10 * 60)
+    return known
+
+
 def parse_network(text):
     """An address or a range as typed ('41.90.1.2', '41.90.0.0/16'), or None."""
     try:
@@ -257,6 +281,10 @@ def after_failure(request, username, user):
                 raise_event('credential_stuffing', f'{tries} failed sign-ins on {accounts} accounts from the '
                             f'internal address {ip} — not blocked. If every sign-in shows this address, set '
                             f'TRUSTED_PROXY_COUNT.', ip=ip, severity='medium')
+            elif is_shared(ip):
+                raise_event('credential_stuffing', f'{tries} failed sign-ins on {accounts} accounts from {ip}, '
+                            f'a network many people share — not blocked automatically; block it from here '
+                            f'if it is an attack.', ip=ip, severity='high')
             else:
                 block(ip, f'{tries} failed sign-ins on {accounts} accounts',
                       hours=IP_BLOCK.total_seconds() / 3600, automatic=True)
@@ -264,26 +292,33 @@ def after_failure(request, username, user):
                             f'address blocked for an hour.', ip=ip, severity='high')
 
 
+def _device(request):
+    return str(request.headers.get('X-Device-Name') or '')[:80]
+
+
 def after_success(request, user):
     from .admin_security import client_ip
     unlock_account(user.username)
-    _check_evasion(client_ip(request) or '', user)
+    _check_evasion(client_ip(request) or '', user, _device(request))
 
 
-def _check_evasion(ip, user):
-    """An address a banned person signed in from lately, now used by someone
-    else: maybe them, back under a new name. Flagged, never acted on alone."""
-    if not ip or is_internal(ip):
+def _check_evasion(ip, user, device=''):
+    """The phone and the address a banned person signed in from lately, now
+    used by someone else: maybe them, back under a new name. Both must match
+    — an address alone is shared by thousands on a mobile network. Flagged,
+    never acted on alone."""
+    if not ip or not device or is_internal(ip):
         return
     from .models import LoginAttempt
     since = timezone.now() - timedelta(days=EVASION_DAYS)
-    banned = (LoginAttempt.objects.filter(ip=ip, outcome=LoginAttempt.OK, created_at__gte=since,
-                                          user__is_active=False)
+    banned = (LoginAttempt.objects.filter(ip=ip, device_name=device, outcome=LoginAttempt.OK,
+                                          created_at__gte=since, user__is_active=False)
               .exclude(user=user).values_list('user__username', flat=True).distinct()[:3])
     banned = list(banned)
     if banned:
-        raise_event('ban_evasion', f'@{user.username} used an address banned account(s) used: '
-                    + ', '.join(f'@{u}' for u in banned), ip=ip, user=user, severity='medium')
+        raise_event('ban_evasion', f'@{user.username} used the phone ({device}) and address banned '
+                    f'account(s) used: ' + ', '.join(f'@{u}' for u in banned), ip=ip, user=user,
+                    severity='medium')
 
 
 # ── signing up ──────────────────────────────────────────────────────────────
@@ -302,8 +337,8 @@ def signup_refusal(request):
 def after_signup(request, user):
     from .admin_security import client_ip
     ip = client_ip(request) or ''
-    _check_evasion(ip, user)
-    if not ip or is_internal(ip):
+    _check_evasion(ip, user, _device(request))
+    if not ip or is_internal(ip) or is_shared(ip):
         return
     key = f'security:signups:{ip}'
     cache.add(key, 0, 60 * 60)

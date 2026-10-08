@@ -121,8 +121,11 @@ class NoticeViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     def perform_create(self, serializer):
+        from .admin import log_admin_action
         notice = serializer.save(created_by=self.request.user)
         schedule_announcement(notice)
+        # A notice goes to everyone's phone: who posted it is on the record.
+        log_admin_action(self.request.user, 'post_notice', 'notice', notice.id, reason=notice.title[:200])
 
     def perform_update(self, serializer):
         before = serializer.instance
@@ -131,6 +134,13 @@ class NoticeViewSet(viewsets.ModelViewSet):
         notice = serializer.save(**({'edited_at': timezone.now()} if changed else {}))
         if not notice.announced:
             schedule_announcement(notice)       # a new publish time moves the push with it
+        from .admin import log_admin_action
+        log_admin_action(self.request.user, 'edit_notice', 'notice', notice.id, reason=notice.title[:200])
+
+    def perform_destroy(self, instance):
+        from .admin import log_admin_action
+        log_admin_action(self.request.user, 'delete_notice', 'notice', instance.id, reason=instance.title[:200])
+        super().perform_destroy(instance)
 
     @action(detail=False, methods=['get'])
     def unseen(self, request):
@@ -232,6 +242,8 @@ class AdminNoteViewSet(viewsets.ModelViewSet):
             return Response({'error': 'A reply needs some words.'}, status=status.HTTP_400_BAD_REQUEST)
         note.reply, note.replied_at, note.replied_by, note.is_read = text, timezone.now(), request.user, True
         note.save(update_fields=['reply', 'replied_at', 'replied_by', 'is_read'])
+        from .admin import log_admin_action
+        log_admin_action(request.user, 'reply_note', 'adminnote', note.id)
         if note.sender_id:
             Notification.objects.create(recipient_id=note.sender_id, sender=request.user,
                                         notification_type='admin_reply', message='The admins answered your note')
@@ -877,11 +889,15 @@ class WallpaperViewSet(viewsets.ModelViewSet):
         return queryset.filter(is_active=True)
 
     def perform_create(self, serializer):
-        serializer.save(uploaded_by=self.request.user)
+        from .admin import log_admin_action
+        wallpaper = serializer.save(uploaded_by=self.request.user)
+        log_admin_action(self.request.user, 'add_wallpaper', 'wallpaper', wallpaper.pk)
 
     def perform_destroy(self, instance):
         # Best-effort: drop the R2 object too, so deleting a wallpaper doesn't
         # leave the bytes paying storage forever. r2.delete never raises.
+        from .admin import log_admin_action
+        log_admin_action(self.request.user, 'delete_wallpaper', 'wallpaper', instance.pk)
         r2.delete(instance.image)
         instance.delete()
 
@@ -892,15 +908,19 @@ class WallpaperViewSet(viewsets.ModelViewSet):
         if not isinstance(items, list):
             return Response({'error': 'items must be a list of {id, sort_order}'},
                             status=status.HTTP_400_BAD_REQUEST)
+        moved = 0
         with transaction.atomic():
-            for entry in items:
-                if not isinstance(entry, dict) or 'id' not in entry:
+            for entry in items[:200]:
+                if not isinstance(entry, dict):
                     continue
                 try:
-                    order = int(entry.get('sort_order', 0))
+                    # Both numbers: a text id reached the database and failed as a 500.
+                    pk, order = int(entry.get('id')), int(entry.get('sort_order', 0))
                 except (TypeError, ValueError):
                     continue
-                Wallpaper.objects.filter(pk=entry['id']).update(sort_order=order)
+                moved += Wallpaper.objects.filter(pk=pk).update(sort_order=order)
+        from .admin import log_admin_action
+        log_admin_action(request.user, 'reorder_wallpapers', 'wallpaper', None, reason=f'{moved} wallpapers')
         return Response({'status': 'reordered'})
 
 def service_share_page(request, service_id):

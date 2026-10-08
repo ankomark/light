@@ -82,7 +82,8 @@ def maybe_auto_hide(report):
         return False
     if not _soft_remove(kind, oid, True):
         return False
-    reports.update(status='reviewed')
+    # The reports stay pending — the queue admins work from — with the
+    # thing already hidden; restoring or confirming it is their call.
     log_admin_action(None, f'auto_hide_{kind}'[:40], kind, oid,
                      reason=f'{reporters} reports' + (' (urgent)' if urgent else ''))
     if author is not None:

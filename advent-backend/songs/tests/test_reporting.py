@@ -61,7 +61,8 @@ class ReportTests(APITestCase):
         self._report(make('last'))
         self.post.refresh_from_db()
         self.assertTrue(self.post.is_removed)
-        self.assertFalse(Report.objects.filter(object_id=self.post.pk, status='pending').exists())
+        # Still in the queue admins work from, with the post already hidden.
+        self.assertEqual(Report.objects.filter(object_id=self.post.pk, status='pending').count(), AUTO_HIDE_AT)
         self.assertTrue(AdminActionLog.objects.filter(action='auto_hide_post').exists())
 
     def test_fewer_reports_hide_it_when_urgent(self, _t):

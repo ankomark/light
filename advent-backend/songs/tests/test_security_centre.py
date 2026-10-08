@@ -63,11 +63,29 @@ class SignInWatchTests(APITestCase):
 
     def test_a_banned_persons_address_flags_a_new_account(self, *_):
         banned = make('banned')
-        LoginAttempt.objects.create(username='banned', user=banned, ip='41.1.1.1', outcome='ok')
+        LoginAttempt.objects.create(username='banned', user=banned, ip='41.1.1.1', outcome='ok',
+                                    device_name='Tecno Spark 10')
         User.objects.filter(pk=banned.pk).update(is_active=False)
+        # Same address, another phone: a shared network, nothing to say.
+        self.client.post('/api/signup/', {'username': 'other', 'email': 'o@x.com', 'password': 'Zx9kLmq2-play'},
+                         format='json', REMOTE_ADDR='41.1.1.1', HTTP_X_DEVICE_NAME='iPhone 13')
+        self.assertFalse(SecurityEvent.objects.filter(kind='ban_evasion').exists())
+        # Same address and the same phone: flagged.
         self.client.post('/api/signup/', {'username': 'newface', 'email': 'nf@x.com', 'password': 'Zx9kLmq2-play'},
-                         format='json', REMOTE_ADDR='41.1.1.1')
+                         format='json', REMOTE_ADDR='41.1.1.1', HTTP_X_DEVICE_NAME='Tecno Spark 10')
         self.assertTrue(SecurityEvent.objects.filter(kind='ban_evasion', ip='41.1.1.1').exists())
+
+    def test_a_network_many_people_share_is_not_blocked(self, *_):
+        """A mobile network's one address (carrier NAT): many people sign in
+        from it, and blocking it would shut them all out."""
+        for i in range(security.SHARED_ACCOUNTS):
+            self._login(make(f'ok{i}').username, 'right-pass-123', ip='41.50.0.1')
+        cache.delete('security:shared:41.50.0.1')
+        names = [make(f's{i}').username for i in range(security.IP_ACCOUNTS)]
+        for i in range(security.IP_FAILS):
+            self._login(names[i % len(names)], ip='41.50.0.1')
+        self.assertFalse(BlockedIP.objects.exists())
+        self.assertIn('many people share', SecurityEvent.objects.get(kind='credential_stuffing').detail)
 
 
 @NO_THROTTLE

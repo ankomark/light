@@ -145,6 +145,9 @@ class AdminSecurityCentreViewSet(viewsets.ViewSet):
         old = user.email
         user.email, user.is_email_verified = email, True     # an admin has checked it is theirs
         user.save(update_fields=['email', 'is_email_verified'])
+        # Whoever took the account may still be signed in: everyone out.
+        from ..admin_security import cut_off
+        cut_off(user, 'email moved in recovery')
         from ..recovery import security_email
         security_email(old, 'The email of your account was changed',
                        f'The account @{user.username} now uses a different email, changed by our team after a '

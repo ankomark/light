@@ -111,14 +111,16 @@ class AdminMusicGenresView(APIView):
         name = str(request.data.get('name') or '').strip()[:100]
         order = request.data.get('order')
         if pk is None and isinstance(order, list):
-            ids = [int(i) for i in order if str(i).isdigit()]
+            # A genre list is dozens long: anything far longer is not one.
+            ids = [int(i) for i in order[:500] if str(i).isdigit()]
             for position, gid in enumerate(ids, start=1):
                 Category.objects.filter(pk=gid).update(position=position)
             log_admin_action(request.user, 'order_genres', 'genre', None, reason=f'{len(ids)} genres')
         elif pk is None:
             if not name:
                 return Response({'name': ['Give the genre a name.']}, status=status.HTTP_400_BAD_REQUEST)
-            slug = slugify(request.data.get('slug') or name)[:60]
+            # A name of symbols only slugifies to nothing, which would clash.
+            slug = slugify(request.data.get('slug') or name)[:60] or f'genre-{Category.objects.count() + 1}'
             if Category.objects.filter(name__iexact=name).exists() or Category.objects.filter(slug=slug).exists():
                 return Response({'name': ['That genre already exists.']}, status=status.HTTP_400_BAD_REQUEST)
             position = (Category.objects.aggregate(m=Max('position'))['m'] or 0) + 1
