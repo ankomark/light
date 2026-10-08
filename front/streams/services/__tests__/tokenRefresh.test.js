@@ -42,3 +42,32 @@ test('a fresh pair is kept', async () => {
   await expect(refreshAccessToken()).resolves.toBe('a2');
   expect(await SecureStore.getItemAsync('refreshToken')).toBe('r2');
 });
+
+describe('which calls carry the token', () => {
+  const run = (url) => axios.interceptors.request.handlers.find((h) => h?.fulfilled)
+    .fulfilled({ url, headers: {} });
+  const { API_URL } = require('../api');
+
+  test('signed-in /auth/ calls carry it (change password, sessions, verify email)', async () => {
+    for (const path of ['/auth/change-password/', '/auth/sessions/', '/auth/verify-email/', '/auth/delete-account/']) {
+      const config = await run(`${API_URL}${path}`);
+      expect(config.headers.Authorization).toMatch(/^Bearer .+/);
+    }
+  });
+
+  test('sign-in, sign-up, refresh and reset go without it', async () => {
+    for (const path of ['/auth/token/', '/auth/token/refresh/', '/auth/signup/', '/auth/forgot-password/',
+      '/auth/reset-password/', '/auth/logout/']) {
+      const config = await run(`${API_URL}${path}`);
+      expect(config.headers.Authorization).toBeUndefined();
+    }
+  });
+});
+
+test('a 401 whose refresh has no network keeps the person signed in', async () => {
+  const handler = axios.interceptors.response.handlers.find((h) => h?.rejected).rejected;
+  axios.post.mockRejectedValueOnce(new Error('Network Error'));
+  await expect(handler({ response: { status: 401 }, config: { url: 'https://x/api/feed/', headers: {} } }))
+    .rejects.toThrow('Network Error');
+  expect(await SecureStore.getItemAsync('refreshToken')).toBe('r');
+});

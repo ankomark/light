@@ -183,9 +183,9 @@ const AdventistMedia = () => {
 
   const deleteStation = (item) => {
     Alert.alert(t('media.deleteTitle'), t('media.deleteConfirm', { name: item.name }), [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: async () => {
           const prev = stations;

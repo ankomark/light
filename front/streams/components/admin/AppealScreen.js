@@ -83,9 +83,7 @@ const AppealScreen = ({ navigation }) => {
         </View>
       ) : (
         <View style={styles.card}>
-          <Text style={styles.intro}>
-            If you believe a moderation action on your account was a mistake, tell us why and a moderator will review it.
-          </Text>
+          <Text style={styles.intro}>{t('appeal.intro')}</Text>
           <TextInput
             style={styles.input}
             placeholder={t('appeal.placeholder')}

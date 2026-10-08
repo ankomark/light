@@ -106,11 +106,34 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
     already-registered devices (so a sign-in on a new device is visible)."""
     throttle_scope = 'auth'
 
+    @staticmethod
+    def canonical_username(typed):
+        """The account's stored username for what was typed: "Mark" signs in
+        "mark" (sign-up keeps names unique whatever the capitals, but sign-in
+        compared them exactly - a capital from the phone's keyboard read as a
+        wrong password), and an email address signs in its account. Left as
+        typed when nothing (or more than one old account) matches."""
+        typed = (typed or '').strip()
+        if not typed or User.objects.filter(username=typed).exists():
+            return typed
+        field = 'email__iexact' if '@' in typed else 'username__iexact'
+        names = list(User.objects.filter(**{field: typed}).values_list('username', flat=True)[:2])
+        return names[0] if len(names) == 1 else typed
+
     def post(self, request, *args, **kwargs):
         from .. import security
         from ..models import LoginAttempt
+        # One spelling per account from here on: the wrong-password lock and
+        # the records count "Mark", "mark" and "MARK" as the one account
+        # (cycling capitals got three times the guesses).
+        typed = str(request.data.get('username') or '')[:150]
+        canonical = self.canonical_username(typed)
+        if canonical != request.data.get('username'):
+            data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+            data['username'] = canonical
+            request._full_data = data
         # A ban with an end date that has passed is lifted as they sign in.
-        username = str(request.data.get('username') or '')[:150]
+        username = canonical
         if username:
             from django.utils import timezone as tz
             User.objects.filter(username=username, is_active=False, banned_until__isnull=False,

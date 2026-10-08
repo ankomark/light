@@ -303,6 +303,7 @@ export const ShareButton = ({ postId, caption, username, variant }) => {
 };
 
 export const DownloadButton = ({ mediaUrl, publicId, contentType }) => {
+  const { t } = useI18n();
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
 
@@ -313,7 +314,7 @@ export const DownloadButton = ({ mediaUrl, publicId, contentType }) => {
   const handleDownload = async () => {
     const downloadUrl = resolveUrl();
     if (!downloadUrl) {
-      Alert.alert("Error", "No media available to download");
+      Alert.alert(t('common.error'), t('social.download.none'));
       return;
     }
 
@@ -355,18 +356,18 @@ export const DownloadButton = ({ mediaUrl, publicId, contentType }) => {
         // Saved to the default gallery location — fine.
       }
 
-      Alert.alert("Saved", "Media saved to your gallery.");
+      Alert.alert(t('social.download.savedTitle'), t('social.download.saved'));
     } catch (error) {
       console.error('Download error:', error);
 
-      let errorMessage = "Failed to download media";
+      let errorMessage = t('social.download.failed');
       if (error.message?.includes('permission')) {
-        errorMessage = "Please enable storage permission in settings";
+        errorMessage = t('social.download.permission');
       } else if (error.message?.toLowerCase().includes('network')) {
-        errorMessage = "Network error — please check your connection";
+        errorMessage = t('social.download.network');
       }
 
-      Alert.alert("Error", errorMessage);
+      Alert.alert(t('common.error'), errorMessage);
     } finally {
       setDownloading(false);
       setProgress(0);

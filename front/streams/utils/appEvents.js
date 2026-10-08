@@ -33,4 +33,7 @@ export const EVENTS = {
   STORY_VIEWED: 'story:viewed',
   // The server refused a write: this account is suspended ({ reason, until }).
   ACCOUNT_SUSPENDED: 'account:suspended',
+  // The server turned the session down for good (refresh token expired or
+  // revoked): the app shows the sign-in instead of failing screen by screen.
+  SESSION_ENDED: 'auth:session-ended',
 };

@@ -7,7 +7,6 @@ import KeyboardLift from './tickets/KeyboardLift';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/useAuth';
-import { API_BASE } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
 import { typography, spacing, radius, shadows } from '../constants/theme';
@@ -53,10 +52,14 @@ const LoginPage = () => {
           status === 429 ? t('auth.tooManyAttempts')
             : code === 'account_locked' ? t('auth.accountLocked')
               : code === 'blocked' ? t('auth.networkBlocked')
-                : (e.response.data?.detail || t('auth.invalidCredentials'))
+                // The server failing is not a wrong password.
+                : status >= 500 ? t('auth.serverDown')
+                  : status === 401 ? t('auth.invalidCredentials')
+                    : (e.response.data?.detail || t('auth.invalidCredentials'))
         );
       } else {
-        setError(`Can't reach the server at ${API_BASE}. ${e?.message || ''}`.trim());
+        // People read this, not developers: no server address, no error text.
+        setError(t('auth.cantReach'));
       }
     } finally {
       setLoading(false);

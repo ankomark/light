@@ -7,7 +7,7 @@ import KeyboardLift from './tickets/KeyboardLift';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
-import { API_URL, API_BASE } from '../services/api';
+import { API_URL } from '../services/api';
 import { useAuth } from '../context/useAuth';
 import { useTheme } from '../context/ThemeContext';
 import { useI18n } from '../context/I18nContext';
@@ -34,6 +34,12 @@ const SignUpPage = () => {
   const handleSubmit = async () => {
     if (!formData.username.trim() || !formData.email.trim() || !formData.password) {
       setError(t('auth.fillAllFields'));
+      return;
+    }
+    // The server's rule, said here first and in the reader's language:
+    // names go into links and @mentions.
+    if (!/^[A-Za-z0-9._]{3,30}$/.test(formData.username.trim())) {
+      setError(t('auth.usernameRule'));
       return;
     }
     if (!isValidEmail(formData.email.trim())) {
@@ -67,10 +73,11 @@ const SignUpPage = () => {
         msg = code === 'signups_paused' || code === 'signups_burst' ? t('auth.signupsPaused')
           : code === 'blocked' ? t('auth.networkBlocked')
             : data?.message || data?.username?.[0] || data?.email?.[0]
-              || data?.password?.[0] || data?.error || data?.detail || `Server error (${err.response.status})`;
+              || data?.password?.[0] || data?.error || data?.detail || t('auth.serverDown');
+        if (err.response.status >= 500) msg = t('auth.serverDown');
       } else {
         // No response — couldn't reach the backend at all.
-        msg = `Can't reach the server at ${API_BASE}. Is the backend running and on the same network?`;
+        msg = t('auth.cantReach');
       }
       setError(msg);
     } finally {

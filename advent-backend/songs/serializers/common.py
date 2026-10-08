@@ -232,6 +232,11 @@ class DetailedUserSerializer(serializers.ModelSerializer):
 
 
 
+import re as _re
+# A new username: 3-30 letters, numbers, dots, underscores (see validate_username).
+USERNAME_RE = _re.compile(r'^[A-Za-z0-9._]{3,30}$')
+
+
 class UserSerializer(serializers.ModelSerializer):
     # Declared explicitly so the default (case-sensitive) UniqueValidator is
     # replaced by our case-insensitive check below with a friendly message.
@@ -285,6 +290,13 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Username must be at least 3 characters.")
         if ' ' in value:
             raise serializers.ValidationError("Username cannot contain spaces.")
+        # Letters, numbers, dots and underscores: a name goes into links
+        # (/u/<name>/) and @mentions, which "/", "@" or an emoji broke. Names
+        # already taken stay as they are; this is for new ones.
+        changed = self.instance is None or value != self.instance.username
+        if changed and not USERNAME_RE.match(value):
+            raise serializers.ValidationError(
+                "Use 3 to 30 letters, numbers, dots or underscores.")
         qs = User.objects.filter(username__iexact=value)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)

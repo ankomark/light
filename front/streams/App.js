@@ -128,6 +128,7 @@ import ProductDetail from './components/marketplace/ProductDetail';
 import Cart from './components/marketplace/Cart';
 import EditProduct from './components/marketplace/EditProduct';
 import AddProduct from './components/marketplace/AddProduct';
+import SelectTrack from './components/marketplace/SelectTrack';
 import SellerDashboard from './components/marketplace/SellerDashboard';
 import Checkout from './components/marketplace/Checkout';
 import OrderHistory from './components/marketplace/OrderHistory';
@@ -620,6 +621,7 @@ const App = () => {
                 <Stack.Screen name="SinglesEvents" component={SinglesEvents} options={{ headerShown: false }} />
                 <Stack.Screen name="SinglesStories" component={SinglesStories} options={{ headerShown: false }} />
                 <Stack.Screen name="AddProduct" component={AddProductWrapper} />
+                <Stack.Screen name="SelectTrack" component={SelectTrackWrapper} />
                 <Stack.Screen name="EditProduct" component={EditProductWrapper} />
                 <Stack.Screen name="Inbox" component={InboxWrapper} />
                 <Stack.Screen name="Chat" component={ChatWrapper} />
@@ -1178,6 +1180,8 @@ const AppealWrapper = ({ navigation }) => (
   </View>
 );
 const AddProductWrapper = marketWrap(AddProduct, 'The product form couldn’t load.');
+// Linking a song to a product (Add / Edit product).
+const SelectTrackWrapper = marketWrap(SelectTrack);
 const EditProductWrapper = marketWrap(EditProduct, 'The product form couldn’t load.');
 
 // Repeat for other screens as needed...

@@ -131,6 +131,9 @@ const refreshAuthToken = async () => {
       const status = error?.response?.status;
       if (status === 400 || status === 401 || status === 403 || error?.message?.startsWith('Session expired')) {
         await clearTokens();
+        // Signed out by the server: the app goes to the sign-in (it kept
+        // showing screens that all failed).
+        require('../utils/appEvents').emit('auth:session-ended');
       }
       throw error;
     } finally {
@@ -145,10 +148,19 @@ const refreshAuthToken = async () => {
 export const refreshAccessToken = () => refreshAuthToken();
 
 
+// The /auth/ calls that work signed out - and are sent without a token (a
+// stale one could get them refused). Every other call carries the token.
+// Before, every /auth/ call went without it: change password, sessions,
+// verify email, delete account... were refused, forced a session refresh,
+// then retried - two extra trips, and change-password's "keep this phone
+// signed in" sent a refresh token the refresh had just replaced.
+const PUBLIC_AUTH = ['/auth/token/', '/auth/token/refresh/', '/auth/signup/', '/auth/logout/',
+  '/auth/forgot-password/', '/auth/reset-password/', '/auth/recovery-request/'];
+export const isPublicAuthUrl = (url) => PUBLIC_AUTH.some((p) => String(url || '').startsWith(`${API_URL}${p}`));
+
 // Request interceptor for adding auth token
 axios.interceptors.request.use(async (config) => {
-  // if (config.url?.includes(API_URL)) {
-    if (config.url?.startsWith(API_URL) && !config.url.includes(`${API_URL}/auth/`)) {
+    if (config.url?.startsWith(API_URL) && !isPublicAuthUrl(config.url)) {
     try {
       const token = await getAuthToken();
       config.headers.Authorization = `Bearer ${token}`;
@@ -177,14 +189,12 @@ axios.interceptors.response.use(
         !originalRequest._retry) {
       
       originalRequest._retry = true;
-      try {
-        const newToken = await refreshAuthToken();
-        originalRequest.headers.Authorization = `Bearer ${newToken}`;
-        return axios(originalRequest);
-      } catch (refreshError) {
-        await clearTokens();
-        throw refreshError;
-      }
+      // refreshAuthToken signs out only when the server refused the session;
+      // a refresh lost to a dropped connection keeps the person signed in
+      // (this used to clear the tokens on any failure, network ones too).
+      const newToken = await refreshAuthToken();
+      originalRequest.headers.Authorization = `Bearer ${newToken}`;
+      return axios(originalRequest);
     }
     return Promise.reject(error);
   }
@@ -325,7 +335,7 @@ export const loginUser = async (username, password) => {
     await storeTokens(response.data.access, response.data.refresh);
     return response.data;
   } catch (error) {
-    console.warn('Login error:', error);
+    if (__DEV__) console.warn('Login error:', error?.message);
     throw error;
   }
 };
@@ -857,22 +867,9 @@ export const checkAuthStatus = async () => {
     return false;
   }
 };
-export const fetchHymns = async (params = {}) => {
-  const queryString = new URLSearchParams(params).toString();
-  return apiRequest('get', `/hymns/?${queryString}`);
-};
 
-export const fetchHymnById = async (id) => {
-  return apiRequest('get', `/hymns/${id}/`);
-};
 
-export const fetchSections = async () => {
-  return apiRequest('get', '/sections/');
-};
 
-export const toggleFavorite = async (hymnId) => {
-  return apiRequest('post', `/hymns/${hymnId}/toggle_favorite/`);
-};
 
 
 // ==================== MEDIA STATIONS ====================
@@ -1127,39 +1124,11 @@ export const deleteVideoStudio = async (id) => {
   return apiRequest('delete', `/video-studios/${id}/`);
 };
 
-// ==================== AUDIO STUDIOS ====================
-export const fetchAudioStudios = async (params = {}) => {
-  const queryString = new URLSearchParams(params).toString();
-  return apiRequest('get', `/audio-studios/?${queryString}`);
-};
 
-export const fetchAudioStudioById = async (id) => {
-  return apiRequest('get', `/audio-studios/${id}/`);
-};
 
-export const fetchMyAudioStudios = async () => {
-  return apiRequest('get', '/audio-studios/my_audiostudios/');
-};
 
-export const createAudioStudio = async (formData) => {
-  return apiRequest('post', '/audio-studios/', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-};
 
-export const updateAudioStudio = async (id, formData) => {
-  return apiRequest('patch', `/audio-studios/${id}/`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-};
 
-export const deleteAudioStudio = async (id) => {
-  return apiRequest('delete', `/audio-studios/${id}/`);
-};
 
 // ==================== COMMUNITIES ====================
 // One community engine for every kind — church, choir, news, or anything a user
@@ -1834,9 +1803,6 @@ export const fetchOrderById = async (id) => {
   return apiRequest('get', `/marketplace/orders/${id}/`);
 };
 
-export const processPayment = async (paymentData) => {
-  return apiRequest('post', '/marketplace/payments/', paymentData);
-};
 
 // Direct-pay fulfilment: the seller confirms they received the buyer's payment
 // for their own lines. This is what commits stock — there is no payment webhook.
@@ -1990,27 +1956,6 @@ export const muteBroadcastChat = (id, userId, mute = true) =>
 export const moderateBroadcast = (id, userId) =>
   apiRequest('post', `/live/broadcasts/${id}/moderate/`, { user_id: userId });
 
-export const fetchFeaturedContent = async () => {
-  const requestId = Math.random().toString(36).substring(2, 9);
-  
-  try {
-    apiLog(`[${requestId}] Fetching featured content`);
-
-    const response = await apiRequest('get', '/featured-content/');
-    
-    apiLog(`[${requestId}] Received featured content`, {
-      count: response.data?.length || 0
-    });
-
-    return response.data || [];
-  } catch (error) {
-    apiLog(`[${requestId}] Error fetching featured content`, {
-      error: error.message,
-      stack: error.stack
-    }, 'error');
-    return [];
-  }
-};
 
 // Enhanced debug utility
 export const debugApiResponse = (response, context = 'API') => {
@@ -2553,12 +2498,6 @@ export default {
   createVideoStudio,
   updateVideoStudio,
   deleteVideoStudio,
-  fetchAudioStudios,
-  fetchAudioStudioById,
-  fetchMyAudioStudios,
-  createAudioStudio,
-  updateAudioStudio,
-  deleteAudioStudio,
   startQuizSession,
   fetchQuizSession,
   answerQuizSession,
@@ -2636,7 +2575,6 @@ export default {
   fetchProductReviews,
   removeFromCart,
   updateCartItem,
-  processPayment,
   confirmOrderPayment,
   createProduct,
   updateProduct,
