@@ -1471,4 +1471,6 @@ class AdminSecurityViewSet(viewsets.ViewSet):
             current.revoked_at = timezone.now()
             current.revoked_reason = 'signed out'
             current.save(update_fields=['revoked_at', 'revoked_reason'])
+            # The sign-in is on the record; so is the sign-out.
+            log_admin_action(request.user, 'admin_sign_out', 'user', request.user.id)
         return Response({'status': 'signed_out'})
