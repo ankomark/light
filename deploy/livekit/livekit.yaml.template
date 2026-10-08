@@ -1,0 +1,57 @@
+# LiveKit server - the live box. Rendered to livekit.yaml by setup.sh;
+# edit this template, not the rendered file.
+#
+# Ports (see README.md for the firewall):
+#   7880 tcp   signalling, local only - Caddy terminates TLS on 443 in front
+#   7881 tcp   WebRTC over TCP, for networks that block UDP but not TCP
+#   50000-60000 udp   audio and video
+#   3478 udp   TURN over UDP
+#   5349 tcp   TURN, local only - Caddy terminates TLS on 443 (by hostname)
+
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  # Hetzner Cloud: without this LiveKit offers the private address in its
+  # ICE candidates and nobody outside can connect.
+  use_external_ip: true
+  enable_loopback_candidate: false
+
+# Local only (bound to 127.0.0.1 in redis.conf). One node does not strictly
+# need it; it is here so a second live box can be added without a redesign.
+redis:
+  address: 127.0.0.1:6379
+
+turn:
+  enabled: true
+  domain: ${TURN_DOMAIN}
+  # TLS is done by Caddy on 443 (SNI = TURN_DOMAIN) and handed to 5349.
+  tls_port: 5349
+  external_tls: true
+  udp_port: 3478
+
+# The key and secret come from the environment (LIVEKIT_KEYS in
+# docker-compose.yml), never from this file.
+webhook:
+  api_key: ${LIVEKIT_API_KEY}
+  urls:
+    - ${WEBHOOK_URL}
+
+room:
+  # Our server creates every room itself (songs/livekit_service.ensure_room),
+  # so an old viewer token cannot bring an ended room back to life.
+  auto_create: false
+  # Reaped this long after the last person leaves (the app also sets it).
+  empty_timeout: 120
+
+logging:
+  level: info
+  # Media and ICE noise: warn only.
+  pion_level: warn
+
+# Metrics for monitoring, scraped locally. The firewall keeps 6789 closed.
+prometheus_port: 6789

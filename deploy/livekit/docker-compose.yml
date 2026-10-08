@@ -1,0 +1,39 @@
+# The live box: LiveKit + its TURN, Caddy for TLS, a local Redis.
+# Host networking throughout: WebRTC needs the real ports (a 10,000-port UDP
+# range through Docker's proxy would be slow and eat memory).
+#
+#   ./setup.sh          first time, and after editing a template or .env
+#   docker compose logs -f livekit
+#   docker compose pull && docker compose up -d     upgrade (after pinning)
+
+services:
+  caddy:
+    image: livekit/caddyl4
+    command: run --config /etc/caddy.yaml --adapter yaml
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./caddy.yaml:/etc/caddy.yaml:ro
+      - ./caddy_data:/data
+
+  livekit:
+    image: livekit/livekit-server:${LIVEKIT_VERSION:-latest}
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # "key: secret" - kept out of livekit.yaml so the rendered file holds
+      # no secret.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server /etc/redis.conf
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./redis.conf:/etc/redis.conf:ro

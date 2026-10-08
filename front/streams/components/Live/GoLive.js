@@ -140,7 +140,7 @@ const GoLive = ({ navigation, route }) => {
           kind: t(kind === 'tv' ? 'live.kindTv' : 'live.kindMeet'),
           have: (eligibility?.followers ?? 0).toLocaleString(),
         })
-        : t('live.startFailed'));
+        : d?.code === 'live_unavailable' ? t('live.unavailable') : t('live.startFailed'));
       setBusy(false);
       setPreviewKey((k) => k + 1);   // the camera back in the preview
     }

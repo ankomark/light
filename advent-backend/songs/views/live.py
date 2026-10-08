@@ -205,13 +205,17 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             lk.end_room(old.room_name)
 
         room_name = f"bc_{uuid.uuid4().hex[:12]}"
+        # The room first: the live server only lets people into rooms we made,
+        # so if it cannot be reached nobody could join - say so now instead of
+        # announcing a broadcast to every follower.
+        if not lk.ensure_room(room_name, metadata={
+            'host': request.user.username, 'kind': kind, 'title': title[:200],
+        }):
+            return Response({'error': 'Live is unavailable right now. Try again in a minute.',
+                             'code': 'live_unavailable'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         broadcast = LiveBroadcast.objects.create(
             host=request.user, kind=kind, title=title[:200], room_name=room_name, singles_only=singles_only,
         )
-        lk.ensure_room(room_name, metadata={
-            'broadcast_id': broadcast.id, 'host': request.user.username,
-            'kind': kind, 'title': broadcast.title,
-        })
         token = lk.create_access_token(
             identity=_identity(request.user), name=request.user.username,
             room=room_name, can_publish=True,

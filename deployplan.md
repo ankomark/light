@@ -161,7 +161,10 @@ transparently re-hashes each one to Argon2 on that user's next successful login.
 - `advent-backend/Caddyfile` — auto-TLS, static, reverse proxy
 - `advent-backend/Dockerfile`
 - `advent-backend/backup.sh` — `pg_dump` → R2
-- `livekit.yaml` — live box config
+- ~~`livekit.yaml` — live box config~~ ✅ **Written** (2026-10-08): `deploy/livekit/` — config
+  templates, compose (LiveKit + Caddy layer4 + Redis), `setup.sh`, runbook. TURN/TLS
+  is on **443** (split from signalling by hostname), not 5349 as in §5. Django
+  side: `python manage.py livekit_check`.
 - `.github/workflows/deploy.yml` — build/test/restart on push (§7)
 - `.github/workflows/migrate.yml` — gated migrations (§7)
 - `HETZNER_DEPLOY.md` — runbook (supersedes the Railway parts of

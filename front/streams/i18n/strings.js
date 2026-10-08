@@ -2553,6 +2553,7 @@ export const STRINGS = {
     'live.blocked': 'You can’t join this broadcast.',
     'live.singlesOnly': 'This room is for Single & Searching members.',
     'live.hostBadge': 'HOST',
+    'live.unavailable': 'Live is unavailable right now. Try again in a minute.',
 
     'reset.title': 'Reset Password',
     'reset.enterCode': 'Enter Reset Code',
@@ -8052,6 +8053,7 @@ export const STRINGS = {
     'live.blocked': 'Huwezi kujiunga na matangazo haya.',
     'live.singlesOnly': 'Chumba hiki ni cha wanachama wa Single & Searching.',
     'live.hostBadge': 'MWENYEJI',
+    'live.unavailable': 'Matangazo hayapatikani kwa sasa. Jaribu tena baada ya dakika moja.',
 
     'reset.title': 'Weka Nywila Upya',
     'reset.enterCode': 'Weka Msimbo wa Kuweka Upya',

@@ -1,0 +1,58 @@
+# Caddy (with the layer4 module) - the only thing listening on 443.
+# Rendered to caddy.yaml by setup.sh.
+#
+# One port, two hostnames, told apart by SNI:
+#   LIVE_DOMAIN -> LiveKit signalling (wss://) on 7880
+#   TURN_DOMAIN -> LiveKit TURN on 5349
+# TURN on 443 matters: carrier networks and office Wi-Fi that allow nothing
+# else still allow 443, so viewers behind them can watch.
+#
+# Certificates come from Let's Encrypt automatically (port 80 must be open
+# for the HTTP challenge).
+
+logging:
+  logs:
+    default:
+      level: INFO
+
+storage:
+  module: file_system
+  root: /data
+
+apps:
+  tls:
+    certificates:
+      automate:
+        - ${LIVE_DOMAIN}
+        - ${TURN_DOMAIN}
+    automation:
+      policies:
+        - issuers:
+            - module: acme
+              email: ${ACME_EMAIL}
+
+  layer4:
+    servers:
+      main:
+        listen: [":443"]
+        routes:
+          - match:
+              - tls:
+                  sni:
+                    - "${TURN_DOMAIN}"
+            handle:
+              - handler: tls
+              - handler: proxy
+                upstreams:
+                  - dial: ["127.0.0.1:5349"]
+          - match:
+              - tls:
+                  sni:
+                    - "${LIVE_DOMAIN}"
+            handle:
+              - handler: tls
+                connection_policies:
+                  - alpn: ["http/1.1"]
+              - handler: proxy
+                upstreams:
+                  - dial: ["127.0.0.1:7880"]

@@ -46,14 +46,22 @@ def _http_url():
     return url.replace('wss://', 'https://').replace('ws://', 'http://')
 
 
+def configured():
+    return bool(settings.LIVEKIT_API_KEY and settings.LIVEKIT_URL)
+
+
 def _run(coro):
-    """Run one async LiveKit server call from sync Django code, best-effort."""
-    if not (settings.LIVEKIT_API_KEY and settings.LIVEKIT_URL):
-        return  # not configured (dev/tests) — no-op
+    """Run one async LiveKit server call from sync Django code, best-effort.
+    True when it went through, False when it failed, None when LiveKit is not
+    configured (dev/tests)."""
+    if not configured():
+        return None
     try:
         asyncio.run(coro())
+        return True
     except Exception:
         logger.exception('LiveKit server call failed')
+        return False
 
 
 def ensure_room(room_name, *, metadata=None, empty_timeout=120, max_participants=0):
@@ -62,7 +70,10 @@ def ensure_room(room_name, *, metadata=None, empty_timeout=120, max_participants
     metadata (host/kind/title) lets clients and webhooks reason about a room
     without a Django round-trip. empty_timeout makes LiveKit reap a room that
     goes empty (e.g. host crashed) so it can't linger. Idempotent: creating an
-    existing room is a no-op on the server side."""
+    existing room is a no-op on the server side.
+
+    Returns False when the server could not be reached: the live box runs
+    with auto_create off, so without this room nobody could join it."""
     async def _go():
         lk = api.LiveKitAPI(_http_url(), settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
         try:
@@ -74,7 +85,7 @@ def ensure_room(room_name, *, metadata=None, empty_timeout=120, max_participants
             ))
         finally:
             await lk.aclose()
-    _run(_go)
+    return _run(_go) is not False
 
 
 def end_room(room_name):

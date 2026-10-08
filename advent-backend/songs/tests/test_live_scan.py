@@ -132,3 +132,26 @@ class LiveScanTests(APITestCase):
         titles = [b['title'] for b in self.client.get('/api/live/broadcasts/').data['results']]
         self.assertEqual(titles[0], 'Friend')
         self.assertEqual(titles[1], 'Busy')
+
+
+class LiveServerDownTests(APITestCase):
+    def test_go_live_refuses_when_the_live_box_cannot_be_reached(self):
+        """With auto_create off on the live box, a room we failed to create
+        can't be joined: say so, and don't push every follower."""
+        host = make('boss', admin_role='super_admin')
+        host.followers.add(make('fan'))
+        self.client.force_authenticate(host)
+        with mock.patch('songs.livekit_service.ensure_room', return_value=False), \
+                mock.patch('songs.push.notify_many') as notify:
+            r = self.client.post('/api/live/broadcasts/', {'kind': 'meet', 'title': 'Prayer'}, format='json')
+        self.assertEqual((r.status_code, r.data['code']), (503, 'live_unavailable'))
+        self.assertFalse(LiveBroadcast.objects.exists())
+        notify.assert_not_called()
+
+    def test_ensure_room_reports_failure_but_not_when_unconfigured(self):
+        from django.test import override_settings
+        from songs import livekit_service as lk
+        self.assertTrue(lk.ensure_room('r'))     # not configured (tests): nothing to fail
+        with override_settings(LIVEKIT_URL='wss://nowhere.invalid'), \
+                mock.patch('songs.livekit_service.asyncio.run', side_effect=OSError('down')):
+            self.assertFalse(lk.ensure_room('r'))

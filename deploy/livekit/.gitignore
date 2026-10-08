@@ -1,0 +1,4 @@
+# Rendered by setup.sh from the templates, and Caddy's certificates.
+livekit.yaml
+caddy.yaml
+caddy_data/
