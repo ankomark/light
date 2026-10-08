@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup of a fresh Hetzner box (Ubuntu 24.04), as root:
+# One-time setup of a fresh Hetzner box (Ubuntu 24.04 or 26.04 LTS), as root:
 #
 #   curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/deploy/app/setup.sh -o setup.sh
 #   bash setup.sh            (or copy it over with scp)
@@ -20,7 +20,7 @@ say "System update"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get upgrade -yq
-apt-get install -yq git curl ufw fail2ban unattended-upgrades cron ca-certificates
+apt-get install -yq git curl ufw fail2ban python3-systemd unattended-upgrades cron ca-certificates
 dpkg-reconfigure -f noninteractive unattended-upgrades
 
 say "Docker"
@@ -46,7 +46,7 @@ echo 'deploy ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-deploy
 chmod 440 /etc/sudoers.d/90-deploy
 mkdir -p /home/deploy/.ssh
 if [ -s /root/.ssh/authorized_keys ]; then
-  cp -n /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys || true
+  [ -s /home/deploy/.ssh/authorized_keys ] || cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
 fi
 chown -R deploy:deploy /home/deploy/.ssh
 chmod 700 /home/deploy/.ssh
@@ -65,7 +65,9 @@ if [ -s /home/deploy/.ssh/authorized_keys ]; then
 else
   echo "!! /home/deploy/.ssh/authorized_keys is empty - root login left ON until you add a key and re-run."
 fi
-systemctl reload ssh || systemctl reload sshd
+# 24.04+ starts sshd on demand (ssh.socket): reloading an idle ssh.service
+# fails, and a new login reads the new settings anyway.
+systemctl try-reload-or-restart ssh.service 2>/dev/null || systemctl try-reload-or-restart sshd.service 2>/dev/null || true
 
 say "Firewall"
 ufw default deny incoming
@@ -82,6 +84,8 @@ say "fail2ban (SSH)"
 cat > /etc/fail2ban/jail.d/sshd.local <<'CONF'
 [sshd]
 enabled = true
+# The journal: newer Ubuntu images keep no /var/log/auth.log to read.
+backend = systemd
 maxretry = 5
 bantime = 1h
 CONF
