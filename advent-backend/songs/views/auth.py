@@ -28,7 +28,7 @@ def _send_verification_email(user, background=False):
 
     def _send():
         send_branded_mail(
-            subject=f"{settings.SITE_NAME} — Verify your email",
+            subject=f"{code} is your {settings.SITE_NAME} verification code",
             message=(
                 f"Hi {user.username},\n\n"
                 f"Your verification code is: {code}\n\n"
@@ -307,7 +307,7 @@ class ForgotPasswordView(APIView):
         # of a false "code sent" (auth emails must be reliable, not fire-and-forget).
         try:
             send_branded_mail(
-                subject=f"{settings.SITE_NAME} — Password Reset Code",
+                subject=f"{code} is your {settings.SITE_NAME} password reset code",
                 message=(
                     f"Hi {user.username},\n\n"
                     f"Your password reset code is: {code}\n\n"

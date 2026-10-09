@@ -57,7 +57,7 @@ def send_reset_code(user):
     PasswordResetCode.objects.create(user=user, code=code, expires_at=timezone.now() + timedelta(minutes=15))
     cache.delete(_reset_failures_key(user))
     send_branded_mail(
-        subject=f'{_site()} — Password Reset Code',
+        subject=f'{code} is your {_site()} password reset code',
         message=(f'Hi {user.username},\n\nYour password reset code is: {code}\n\n'
                  f'This code expires in 15 minutes.\n\n'
                  f"If you didn't request this, you can ignore this email.\n\n— {_site()} Team"),

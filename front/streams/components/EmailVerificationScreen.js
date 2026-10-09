@@ -125,6 +125,7 @@ const EmailVerificationScreen = () => {
           We sent a 6-digit code to{'\n'}
           <Text style={styles.email}>{email || 'your email address'}</Text>
         </Text>
+        <Text style={styles.hint}>{t('verify.lookElsewhere')}</Text>
 
         {/* OTP input boxes */}
         <View style={styles.codeRow}>
@@ -196,6 +197,7 @@ const styles = StyleSheet.create({
   title: { ...typography.h1, color: colors.textPrimary, textAlign: 'center', marginBottom: spacing.sm },
   subtitle: { ...typography.body, color: colors.textSecondary, textAlign: 'center', lineHeight: 24 },
   email: { color: colors.primary, fontWeight: '600' },
+  hint: { ...typography.caption, fontSize: 13, lineHeight: 18, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.md },
   codeRow: {
     flexDirection: 'row',
     gap: spacing.sm,
