@@ -50,7 +50,7 @@ describe.each([
 });
 
 test('a 390 px phone gets the full-size title', () => {
-  expect(titleWidthFor(390)).toBe(226);
+  expect(titleWidthFor(390)).toBe(217);   // 226, 4% smaller
 });
 
 test('tab labels grow only a little under a large system font', () => {
