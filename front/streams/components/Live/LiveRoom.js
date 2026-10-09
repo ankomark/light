@@ -428,9 +428,12 @@ const RoomInner = ({
     });
     return m;
   }, [cameraTracks, publishers]);
+  // The host keeps the big screen. Following whoever talks made the picture
+  // flick back and forth between host and co-host mid-sentence; co-hosts stay
+  // in their small tiles, which light up when they speak.
   const spotlight = useMemo(
-    () => publishers.find((p) => p.isSpeaking) || publishers[0] || null,
-    [publishers],
+    () => publishers.find((p) => p.identity === hostId) || publishers[0] || null,
+    [publishers, hostId],
   );
   const myName = localParticipant?.name || localParticipant?.identity || 'me';
 
@@ -1326,7 +1329,7 @@ const RoomInner = ({
   );
 };
 
-// Video: large active-speaker tile + a thumbnail row of the other publishers.
+// Video: the host in the large tile + a thumbnail row of the other publishers.
 const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentity, onKick, landscape, fill }) => {
   // Landscape is full screen: the whole picture, fitted (a host filming upright
   // shows complete between dark bars), never cropped to a zoomed-in strip.
