@@ -47,6 +47,18 @@ ok "rendered livekit.yaml and caddy.yaml"
 
 [ "${1:-}" = "--check" ] && { ok "check only - nothing started"; exit 0; }
 
+# ── the box's own firewall ───────────────────────────────────────────────────
+# deploy/app/setup.sh (used to harden this box too) opens only SSH and the web
+# ports. Host networking means ufw filters LiveKit directly, so the media ports
+# must be opened here as well as in the Hetzner firewall - else rooms connect
+# and then carry no audio or video.
+if command -v ufw >/dev/null && sudo ufw status | grep -q "Status: active"; then
+  for rule in 80/tcp 443/tcp 7881/tcp 3478/udp 50000:60000/udp; do
+    sudo ufw allow "$rule" >/dev/null
+  done
+  ok "ufw: 80, 443, 7881/tcp, 3478/udp, 50000-60000/udp open"
+fi
+
 # ── start ────────────────────────────────────────────────────────────────────
 command -v docker >/dev/null || fail "Docker missing: curl -fsSL https://get.docker.com | sh"
 docker compose up -d
