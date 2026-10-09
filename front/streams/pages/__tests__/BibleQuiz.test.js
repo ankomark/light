@@ -7,7 +7,7 @@ import React from 'react';
 import { ActivityIndicator } from 'react-native';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import { writeCache, peekCache, dropCache } from '../../utils/screenCache';
-import { quizKeys, todayIso } from '../../utils/quizCache';
+import { quizKeys, todayIso, gameNow } from '../../utils/quizCache';
 
 jest.setTimeout(20000);
 
@@ -186,7 +186,9 @@ describe('the quiz hub', () => {
     const screen = render(<QuizHome navigation={nav()} />);
     expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
     expect(screen.queryByText(todayIso())).toBeNull();
-    expect(screen.getByText(require('date-fns').format(new Date(), 'EEEE d MMMM'))).toBeTruthy();
+    // The quiz day turns over at midnight Nairobi time, not on the device's
+    // clock (CI runs in UTC; they differ for three hours every night).
+    expect(screen.getByText(require('date-fns').format(gameNow(), 'EEEE d MMMM'))).toBeTruthy();
   });
 
   test('the word puzzle is not linked from here (it has its own place in the menu)', async () => {
