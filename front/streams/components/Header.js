@@ -21,8 +21,8 @@ const INACTIVE = 'rgba(255,255,255,0.62)';
 // Tab icons: plain white line icons; the open screen's is filled, in the accent.
 const ICON = '#FFFFFF';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
-// "Adventist life": embossed white script with a gold "life", on a transparent
-// background (trimmed to the lettering).
+// "Adventist life": embossed white script with a gold "life" and a fine gold
+// line under "Adventist", on a transparent background (trimmed to the lettering).
 const TITLE_ART = require('../assets/title-cinematic.png');
 const TITLE_RATIO = 900 / 181;
 // How round the header's lower corners are.
