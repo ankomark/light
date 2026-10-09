@@ -7,7 +7,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/useAuth';
 import NotificationsBell from './NotificationsBell';
 import HamburgerMenu from '../components/HamburgerMenu';
-import ScreenVignette from './ScreenVignette';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
@@ -28,6 +27,12 @@ const MUSIC_ART = require('../assets/music-icon.png');
 // The Holy Bible, its black cover lifted to charcoal and its gold warmed so it
 // stands off the navy header.
 const BIBLE_ART = require('../assets/bible-icon.png');
+// "ADVENTIST LIFE" in 3D flame-gold with its light ring, cut out of its black
+// background (letters, bevels and ring only - no haze, so no box behind it).
+const TITLE_ART = require('../assets/title-cinematic.png');
+const TITLE_RATIO = 900 / 175;
+// How round the header's lower corners are.
+const CURVE = 30;
 
 /** A single bottom-row destination: filled icon + accent when on that screen.
  *  With `art`, a coloured picture in its own colours instead of a glyph (the
@@ -72,8 +77,9 @@ const Header = ({ transparentBg = false }) => {
   // touch on tablets. Bottom-row nav content is capped + centered on wide
   // screens so it reads as a bar, not stretched thin.
   const { width } = useWindowDimensions();
-  const titleSize = width < 340 ? 18 : width < 400 ? 21 : width < 768 ? 24 : 27;
-  const titleTracking = width < 400 ? 1.4 : width < 768 ? 2.5 : 3;
+  // The title artwork's width: the space between the medallion and the icons
+  // on a phone, a touch more on a tablet. Its height follows the picture.
+  const titleW = width < 340 ? 170 : width < 400 ? 214 : width < 768 ? 238 : 300;
   const rowMaxWidth = width >= 768 ? 720 : undefined;  // centered bar on tablets
 
   // Name of the screen currently shown in this stack, for active highlighting.
@@ -81,6 +87,7 @@ const Header = ({ transparentBg = false }) => {
   const isOn = (name) => activeRoute === name;
 
   return (
+    <View style={styles.shadowWrap}>
     <View style={[styles.root, transparentBg && styles.rootTransparent]}>
       {/* Background wallpaper (extends under the status bar) + glass blur and a
           legibility scrim so the nav icons/labels stay readable over it. When
@@ -97,14 +104,13 @@ const Header = ({ transparentBg = false }) => {
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
-      {/* Dark-blue glass: deeper toward the nav row so the labels read cleanly. */}
+      {/* The feed's own glass (SocialFeed's top bar), so the header and the
+          feed read as one material over the wallpaper. */}
       <LinearGradient
-        colors={['rgba(11, 38, 87, 0.5)', 'rgba(6, 28, 68, 0.8)']}
+        colors={['rgba(8,22,46,0.5)', 'rgba(8,20,40,0.68)']}
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
-      {/* Curved-glass edge vignette in navy for a premium, recessed-edge feel. */}
-      <ScreenVignette strength={0.8} side={32} vertical={35} tintRgb="6,16,34" zIndex={4} />
 
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
@@ -126,16 +132,17 @@ const Header = ({ transparentBg = false }) => {
             </View>
           </LinearGradient>
 
-          {/* Title fills the space between the logo and the icons and centers
-              within it — equal padding on both sides. */}
-          <Text
-            style={[styles.title, { fontSize: titleSize, letterSpacing: titleTracking }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.8}
-          >
-            ADVENTIST LIFE
-          </Text>
+          {/* The cinematic title fills the space between the medallion and the
+              icons and centers within it — equal room on both sides. */}
+          <View style={styles.titleWrap}>
+            <Image
+              source={TITLE_ART}
+              style={[styles.titleArt, { width: titleW }]}
+              resizeMode="contain"
+              accessibilityRole="header"
+              accessibilityLabel="Adventist Life"
+            />
+          </View>
 
           <View style={styles.rightCluster}>
             {/* Dedicated Videos feed (TikTok-style). Sits just left of the menu. */}
@@ -223,13 +230,34 @@ const Header = ({ transparentBg = false }) => {
       </View>
       </SafeAreaView>
     </View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   // Deep-blue fallback shows if the wallpaper fails to load; overflow clips the
   // absolute-fill image/blur to the header's measured height.
-  root: { backgroundColor: HEADER_BG, overflow: 'hidden' },
+  // The lower corners curve, with a fine light edge down the sides and the
+  // title's warm orange along the curve; the shadow (on the wrapper, since the
+  // clipping below would cut it off on iOS) floats it over the feed.
+  shadowWrap: {
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 15,
+  },
+  root: {
+    backgroundColor: HEADER_BG,
+    overflow: 'hidden',
+    borderBottomLeftRadius: CURVE,
+    borderBottomRightRadius: CURVE,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderLeftColor: 'rgba(255,255,255,0.14)',
+    borderRightColor: 'rgba(255,255,255,0.14)',
+    borderBottomColor: 'rgba(244,162,97,0.55)',
+  },
   // Home screen: let the parent's shared wallpaper show through the glass.
   rootTransparent: { backgroundColor: 'transparent' },
   // zIndex 5 keeps the brand + nav above the navy vignette (zIndex 4), so the
@@ -275,20 +303,19 @@ const styles = StyleSheet.create({
   logo: { width: 32, height: 30 },
   // Fills the space between the logo and the icons and centers within it, so the
   // gap to the logo (left) equals the gap to the video icon (right).
-  title: {
+  // The row keeps the height it had with the text title (the medallion's 34):
+  // the artwork is taller, so it is centred and its glow and ring spread into
+  // the row's own padding instead of making the header taller.
+  titleWrap: {
     flex: 1,
-    marginHorizontal: 10,
-    color: colors.accent,
-    textAlign: 'center',
-    fontFamily: 'Cinzel_800ExtraBold',
-    fontSize: 24,
-    // Wider tracking gives Cinzel its engraved, monument-like premium feel.
-    letterSpacing: 2.5,
-    // Blue-theme glow/drop shadow for depth.
-    textShadowColor: 'rgba(13,71,161,0.9)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
+    height: 34,
+    marginHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
   },
+  // Width set inline (titleW); never wider than the room it has.
+  titleArt: { maxWidth: '100%', aspectRatio: TITLE_RATIO },
   menuContainer: { marginLeft: 'auto' },
   rightCluster: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
   videosBtn: { padding: 2 },
