@@ -23,7 +23,7 @@ const SearchBaar = ({ onSearch, placeholder = 'Search...' }) => {
 
   return (
     <View style={[styles.container, focused && styles.containerFocused]}>
-      <Feather name="search" size={18} color={focused ? colors.primary : colors.textMuted} />
+      <Feather name="search" size={16} color={focused ? colors.primary : colors.textMuted} />
       <TextInput
         style={styles.input}
         placeholder={placeholder}
@@ -51,8 +51,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    height: 42,
-    paddingHorizontal: 14,
+    // Slim, so the feed starts higher (it was 42).
+    height: 36,
+    paddingHorizontal: 13,
     borderRadius: radius.full,
     backgroundColor: colors.inputBg,
     borderWidth: 1,
@@ -63,7 +64,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     color: colors.textPrimary,
     paddingVertical: 0,
   },

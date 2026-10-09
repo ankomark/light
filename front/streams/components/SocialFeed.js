@@ -1569,13 +1569,14 @@ const SocialFeed = ({ showBackground = true }) => {
           </View>
           <TouchableOpacity
             style={styles.createBtn}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             onPress={() => navigation.navigate('CreatePost')}
             activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityLabel={t('feed.newPost')}
             testID="feed-create"
           >
-            <MaterialIcons name="add" size={26} color={colors.white} />
+            <MaterialIcons name="add" size={22} color={colors.white} />
           </TouchableOpacity>
         </View>
 
@@ -1583,6 +1584,7 @@ const SocialFeed = ({ showBackground = true }) => {
         {!searchQuery.trim() && (
           <View style={styles.tabs}>
             <TouchableOpacity
+              hitSlop={{ top: 6, bottom: 6 }}
               style={[styles.tab, feedType === 'following' && styles.tabActive]}
               onPress={() => selectFeed('following')}
               activeOpacity={0.8}
@@ -1595,6 +1597,7 @@ const SocialFeed = ({ showBackground = true }) => {
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
+              hitSlop={{ top: 6, bottom: 6 }}
               style={[styles.tab, feedType === 'for_you' && styles.tabActive]}
               onPress={() => selectFeed('for_you')}
               activeOpacity={0.8}
@@ -1609,6 +1612,7 @@ const SocialFeed = ({ showBackground = true }) => {
             {/* Explore: people, posts and places to discover. It was in the
                 header's nav row; it sits with the feeds now. */}
             <TouchableOpacity
+              hitSlop={{ top: 6, bottom: 6 }}
               style={[styles.tab, styles.exploreTab]}
               onPress={() => navigation.navigate('Explore')}
               activeOpacity={0.8}
@@ -1729,9 +1733,10 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingTop: 8,
+    // Kept slim: search + tabs used to take ~100 px before the first post.
+    paddingTop: 6,
     paddingHorizontal: 12,
-    paddingBottom: 8,
+    paddingBottom: 6,
     backgroundColor: 'transparent',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(11,6,83,0.18)',
@@ -1744,9 +1749,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   createBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1755,12 +1760,12 @@ const styles = StyleSheet.create({
 
   tabs: {
     flexDirection: 'row',
-    paddingTop: 10,
+    paddingTop: 6,
     gap: 8,
   },
   tab: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 5,
     borderRadius: radius.full,
     backgroundColor: colors.card,
   },
@@ -1768,9 +1773,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   exploreTab: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  exploreArt: { width: 18, height: 18 },
+  exploreArt: { width: 16, height: 16 },
   tabText: {
     ...typography.label,
+    fontSize: 13,
     color: colors.textSecondary,
   },
   tabTextActive: {
