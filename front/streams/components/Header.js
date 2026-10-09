@@ -9,6 +9,7 @@ import NotificationsBell from './NotificationsBell';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
+import { FONT_SCALE } from '../utils/layout';
 import { useI18n } from '../context/I18nContext';
 import { useWallpapersOn } from '../context/WallpaperContext';
 import { useFeature } from '../context/AppStatusContext';
@@ -34,6 +35,16 @@ const TITLE_RATIO = 900 / 175;
 // How round the header's lower corners are.
 const CURVE = 18;
 
+// The title artwork's width: whatever the row leaves between the medallion and
+// the Videos + menu icons (padding 2x18, medallion 32, title margins 2x6, icons
+// ~72), so it fits a 320 px phone and grows to the approved 238 on a 390 one.
+// Capped at 256 on a tablet: wider would make it taller than its row (50).
+const ROW_FIXED = 18 * 2 + 32 + 6 * 2 + 72;
+export const titleWidthFor = (width, rowMaxWidth) => {
+  const room = Math.min(width, rowMaxWidth || width) - ROW_FIXED;
+  return Math.max(120, Math.min(width >= 768 ? 256 : 238, room));
+};
+
 /** A single bottom-row destination: filled icon + accent when on that screen.
  *  With `art`, a coloured picture in its own colours instead of a glyph (the
  *  label still lights up when on that screen); with `tint` too, the picture
@@ -57,7 +68,7 @@ const NavItem = ({ set: Set = Ionicons, active, inactive, art, artStyle, tint, l
     ) : (
       <Set name={isActive ? active : inactive} size={22} color={isActive ? colors.accent : INACTIVE} />
     )}
-    <Text style={[styles.navLabel, isActive && styles.navLabelActive]} numberOfLines={1}>
+    <Text style={[styles.navLabel, isActive && styles.navLabelActive]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.tight}>
       {label}
     </Text>
   </TouchableOpacity>
@@ -77,10 +88,8 @@ const Header = ({ transparentBg = false }) => {
   // touch on tablets. Bottom-row nav content is capped + centered on wide
   // screens so it reads as a bar, not stretched thin.
   const { width } = useWindowDimensions();
-  // The title artwork's width: the space between the medallion and the icons
-  // on a phone, a touch more on a tablet. Its height follows the picture.
-  const titleW = width < 340 ? 170 : width < 400 ? 214 : width < 768 ? 238 : 300;
   const rowMaxWidth = width >= 768 ? 720 : undefined;  // centered bar on tablets
+  const titleW = titleWidthFor(width, rowMaxWidth);
 
   // Name of the screen currently shown in this stack, for active highlighting.
   const activeRoute = useNavigationState((s) => s?.routes?.[s.index]?.name);
@@ -189,7 +198,7 @@ const Header = ({ transparentBg = false }) => {
 
           <View style={styles.navItem}>
             <NotificationsBell navigation={navigation} />
-            <Text style={styles.navLabel} numberOfLines={1}>{t('header.alerts')}</Text>
+            <Text style={styles.navLabel} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.tight}>{t('header.alerts')}</Text>
           </View>
 
           <NavItem
@@ -212,17 +221,17 @@ const Header = ({ transparentBg = false }) => {
                 style={[styles.profilePicture, isOn('Profile') && styles.profileActive]}
                 onError={() => {}}
               />
-              <Text style={[styles.navLabel, isOn('Profile') && styles.navLabelActive]} numberOfLines={1}>
+              <Text style={[styles.navLabel, isOn('Profile') && styles.navLabelActive]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.tight}>
                 You
               </Text>
             </TouchableOpacity>
           ) : (
             <View style={styles.authRow}>
               <TouchableOpacity onPress={() => navigation.navigate('SignUp')} accessibilityRole="button">
-                <Text style={styles.navLink}>{t('auth.signUp')}</Text>
+                <Text style={styles.navLink} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('auth.signUp')}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => navigation.navigate('Login')} accessibilityRole="button">
-                <Text style={styles.navLink}>{t('auth.login')}</Text>
+                <Text style={styles.navLink} maxFontSizeMultiplier={FONT_SCALE.chrome}>{t('auth.login')}</Text>
               </TouchableOpacity>
             </View>
           )}
