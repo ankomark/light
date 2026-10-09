@@ -122,9 +122,18 @@ const BattleScreen = ({ navigation, route }) => {
     return () => clearInterval(id);
   }, [code, live, battle?.status, refresh]);
 
-  // The question's clock; at zero, ask for the answer to be shown.
   const status = battle?.status;
   const index = battle?.current;
+
+  // A new question starts clean, however it arrived (the socket, a poll, the
+  // answer to a step): last question's pick and any error go. Without this a
+  // phone reading by polls kept the old pick and could not answer again.
+  useEffect(() => {
+    setPicked(null);
+    setError('');
+  }, [index]);
+
+  // The question's clock; at zero, ask for the answer to be shown.
   useEffect(() => {
     if (status !== 'question') return undefined;
     const tick = () => {
@@ -132,7 +141,12 @@ const BattleScreen = ({ navigation, route }) => {
       setRemaining(left);
       if (left === 0 && asked.current.reveal !== index) {
         asked.current.reveal = index;
-        revealBattle(code, index).then(apply).catch(() => {});
+        revealBattle(code, index).then(apply).catch(() => {
+          // Refused (this phone's clock ran a hair ahead of the server's) or
+          // the network blinked: ask again shortly, or a battle whose host
+          // has gone would sit at 0 for ever.
+          setTimeout(() => { if (asked.current.reveal === index) asked.current.reveal = -1; }, 1500);
+        });
       }
     };
     tick();
@@ -143,12 +157,19 @@ const BattleScreen = ({ navigation, route }) => {
   // A shown answer moves on by itself after a while (the host may go sooner).
   useEffect(() => {
     if (status !== 'reveal' || battle?.is_host) return undefined;
-    const id = setTimeout(() => {
-      if (asked.current.next === index) return;
+    let stopped = false;
+    let id;
+    const attempt = () => {
+      if (stopped || asked.current.next === index) return;
       asked.current.next = index;
-      nextBattle(code, index).then(apply).catch(() => {});
-    }, HOLD_MS);
-    return () => clearTimeout(id);
+      nextBattle(code, index).then(apply).catch(() => {
+        // Refused or offline: try again, so the battle never stalls here.
+        asked.current.next = -1;
+        if (!stopped) id = setTimeout(attempt, 2000);
+      });
+    };
+    id = setTimeout(attempt, HOLD_MS);
+    return () => { stopped = true; clearTimeout(id); };
   }, [status, index, code, battle?.is_host]);
 
   // Right or wrong, felt when the answer is shown.
@@ -295,6 +316,7 @@ const BattleScreen = ({ navigation, route }) => {
     const qq = battle.question;
     const most = Math.max(1, ...r.counts);
     const me = battle.me;
+    const mine = me?.last?.choice ?? picked;
     body = (
       <View style={styles.play}>
         {!battle.is_host && me?.last && (
@@ -305,9 +327,15 @@ const BattleScreen = ({ navigation, route }) => {
             <Text style={styles.place}>{t('battle.place', { place: me.place })}</Text>
           </View>
         )}
-        {!battle.is_host && me && !me.last && <Text style={styles.wait}>{t('battle.noAnswer')}</Text>}
+        {/* Only once we know: the shown answer arrives a beat before my result. */}
+        {!battle.is_host && me && !me.last && !me.answered && picked === null && (
+          <Text style={styles.wait}>{t('battle.noAnswer')}</Text>
+        )}
         {qq?.choices.map((c, i) => (
-          <View key={i} style={[styles.choice, i === r.answer_index ? styles.choiceRight : styles.choiceIdle]}>
+          <View key={i} style={[
+            styles.choice,
+            i === r.answer_index ? styles.choiceRight : (i === mine ? styles.choiceWrong : styles.choiceIdle),
+          ]}>
             <Text style={styles.mark}>{MARKS[i] || i + 1}</Text>
             <Text style={styles.choiceText}>{c}</Text>
             <View style={styles.bar}><View style={[styles.barFill, { width: `${(r.counts[i] / most) * 100}%` }]} /></View>
@@ -417,6 +445,7 @@ const styles = StyleSheet.create({
   choicePicked: { borderColor: GOLD, backgroundColor: 'rgba(244,162,97,0.18)' },
   choiceIdle: { opacity: 0.7 },
   choiceRight: { borderColor: '#43A047', backgroundColor: 'rgba(67,160,71,0.18)' },
+  choiceWrong: { borderColor: '#E53935', backgroundColor: 'rgba(229,57,53,0.16)' },
   mark: { fontFamily: DISPLAY, fontSize: 15, color: GOLD, width: 18 },
   choiceText: { flex: 1, fontSize: 15, color: PARCHMENT },
   bar: { width: 60, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden' },

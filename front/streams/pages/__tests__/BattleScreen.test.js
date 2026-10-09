@@ -130,3 +130,43 @@ test('a wrong code is said plainly', async () => {
   await act(async () => { fireEvent.press(screen.getByText('battle.join')); });
   await waitFor(() => expect(screen.getByText('battle.error.not_found')).toBeTruthy());
 });
+
+test('a refused "show the answer" is asked again, so the battle never sits at 0', async () => {
+  mockApi.joinBattle.mockResolvedValue(lobby());
+  mockApi.fetchBattle.mockResolvedValue(lobby({ status: 'question', current: 0, question: { ...question, remaining_ms: 0 } }));
+  mockApi.revealBattle
+    .mockRejectedValueOnce({ response: { status: 400, data: { code: 'not_yet' } } })
+    .mockResolvedValue(lobby({ status: 'reveal', current: 0 }));
+  render(<BattleScreen navigation={nav()} route={{ params: { code: 'ABC234' } }} />);
+  await waitFor(() => expect(mockRoom).toBeTruthy());
+  act(() => mockRoom({ type: 'question', question: { ...question, remaining_ms: 0 } }));
+  await waitFor(() => expect(mockApi.revealBattle).toHaveBeenCalledTimes(2), { timeout: 5000 });
+});
+
+test('reading by polls, the next question can be answered (the old pick is gone)', async () => {
+  mockApi.joinBattle.mockResolvedValue(lobby({ status: 'question', current: 0, question }));
+  mockApi.answerBattle.mockResolvedValue({ accepted: true, all_in: false });
+  const screen = render(<BattleScreen navigation={nav()} route={{ params: { code: 'ABC234' } }} />);
+  await waitFor(() => expect(screen.getByText('Who built the ark?')).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByLabelText('A. Noah')); });
+  // No socket event: the next question arrives through a poll.
+  const second = { ...question, index: 1, prompt: 'Who led Israel out of Egypt?' };
+  mockApi.fetchBattle.mockResolvedValue(lobby({ status: 'question', current: 1, question: second }));
+  await waitFor(() => expect(screen.getByText('Who led Israel out of Egypt?')).toBeTruthy(), { timeout: 8000 });
+  await act(async () => { fireEvent.press(screen.getByLabelText('B. Moses')); });
+  expect(mockApi.answerBattle).toHaveBeenLastCalledWith('ABC234', 1, 1);
+});
+
+test('the answer shown: my wrong pick is marked, and no "you didn\'t answer" while my result loads', async () => {
+  mockApi.joinBattle.mockResolvedValue(lobby());
+  mockApi.answerBattle.mockResolvedValue({ accepted: true, all_in: false });
+  mockApi.fetchBattle.mockImplementation(() => new Promise(() => {}));   // my result not back yet
+  const screen = render(<BattleScreen navigation={nav()} route={{ params: { code: 'ABC234' } }} />);
+  await waitFor(() => expect(mockRoom).toBeTruthy());
+  act(() => mockRoom({ type: 'question', question }));
+  await act(async () => { fireEvent.press(screen.getByLabelText('B. Moses')); });
+  act(() => mockRoom({ type: 'reveal', reveal: { index: 0, answer_index: 0, reference: '', explanation: '',
+    counts: [1, 1, 0, 0], ranking: [] } }));
+  await waitFor(() => expect(screen.getByTestId('battle-board')).toBeTruthy());
+  expect(screen.queryByText('battle.noAnswer')).toBeNull();
+});
