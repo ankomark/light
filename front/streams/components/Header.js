@@ -32,7 +32,7 @@ const BIBLE_ART = require('../assets/bible-icon.png');
 const TITLE_ART = require('../assets/title-cinematic.png');
 const TITLE_RATIO = 900 / 175;
 // How round the header's lower corners are.
-const CURVE = 30;
+const CURVE = 18;
 
 /** A single bottom-row destination: filled icon + accent when on that screen.
  *  With `art`, a coloured picture in its own colours instead of a glyph (the
