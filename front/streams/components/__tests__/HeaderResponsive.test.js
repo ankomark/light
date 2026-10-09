@@ -28,7 +28,7 @@ jest.mock('../../context/AppStatusContext', () => ({ useFeature: () => true }));
 const { default: Header, titleWidthFor } = require('../Header');
 const { FONT_SCALE } = require('../../utils/layout');
 
-const RATIO = 900 / 188;
+const RATIO = 900 / 181;
 const ROW_HEIGHT_WITH_PADDING = 34 + 5 * 2;
 
 describe.each([
