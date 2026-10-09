@@ -41,7 +41,7 @@ describe.each([
 
   test('the title fits between the medallion and the icons', () => {
     expect(w).toBeLessThanOrEqual(Math.max(room, 120));
-    expect(w).toBeGreaterThanOrEqual(120);
+    expect(w).toBeGreaterThanOrEqual(60);
   });
 
   test('the title is never taller than its row', () => {
@@ -50,7 +50,7 @@ describe.each([
 });
 
 test('a 390 px phone gets the full-size title', () => {
-  expect(titleWidthFor(390)).toBe(187);   // 226, after 4%, 4% and 10% smaller
+  expect(titleWidthFor(390)).toBe(112);   // 226, after 4%, 4%, 10% and 40% smaller
 });
 
 test('tab labels grow only a little under a large system font', () => {

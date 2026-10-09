@@ -40,7 +40,7 @@ const CURVE = 12;
 // ~72), so it fits a 320 px phone. At most 226 (44 tall: the row's 34 and its
 // 5 + 5 padding), so the title never makes the header taller.
 const ROW_FIXED = 18 * 2 + 32 + 6 * 2 + 72;
-const TITLE_SCALE = 0.828;  // 4%, 4% and then 10% smaller
+const TITLE_SCALE = 0.497;  // 4%, 4%, 10% and then 40% smaller
 export const titleWidthFor = (width, rowMaxWidth) => {
   const room = Math.min(width, rowMaxWidth || width) - ROW_FIXED;
   // A touch under the room it has (asked for: smaller, on every screen).
