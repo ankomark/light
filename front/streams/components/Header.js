@@ -37,12 +37,12 @@ const CURVE = 18;
 
 // The title artwork's width: whatever the row leaves between the medallion and
 // the Videos + menu icons (padding 2x18, medallion 32, title margins 2x6, icons
-// ~72), so it fits a 320 px phone and grows to the approved 238 on a 390 one.
-// Capped at 256 on a tablet: wider would make it taller than its row (50).
+// ~72), so it fits a 320 px phone. At most 226 (44 tall: the row's 34 and its
+// 5 + 5 padding), so the title never makes the header taller.
 const ROW_FIXED = 18 * 2 + 32 + 6 * 2 + 72;
 export const titleWidthFor = (width, rowMaxWidth) => {
   const room = Math.min(width, rowMaxWidth || width) - ROW_FIXED;
-  return Math.max(120, Math.min(width >= 768 ? 256 : 238, room));
+  return Math.max(120, Math.min(226, room));
 };
 
 /** A single bottom-row destination: filled icon + accent when on that screen.
@@ -275,7 +275,7 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: 'transparent',
     paddingHorizontal: 18,
-    paddingBottom: 8,
+    paddingBottom: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(11, 6, 83, 0.18)',
   },
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 5,
   },
   // Gold metallic rim (the gradient is the ring; padding sets its thickness).
   logoRing: {
@@ -332,16 +332,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    paddingTop: 8,
+    paddingTop: 4,
   },
   navItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingVertical: 2,
+    paddingVertical: 1,
   },
-  navArt: { width: 24, height: 24 },
-  homeArt: { width: 26.4, height: 26.4 },   // the house, 10% larger
+  navArt: { width: 22, height: 22 },
+  homeArt: { width: 24.2, height: 24.2 },   // the house, 10% larger
   // On the marketplace: a touch larger, as the glyphs fill in when active.
   navArtActive: { transform: [{ scale: 1.12 }] },
   navLabel: {
@@ -354,9 +354,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   profilePicture: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.7)',
   },

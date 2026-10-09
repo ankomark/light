@@ -29,7 +29,7 @@ const { default: Header, titleWidthFor } = require('../Header');
 const { FONT_SCALE } = require('../../utils/layout');
 
 const RATIO = 900 / 175;
-const ROW_HEIGHT_WITH_PADDING = 34 + 8 * 2;
+const ROW_HEIGHT_WITH_PADDING = 34 + 5 * 2;
 
 describe.each([
   ['small Android', 320], ['common Android', 360], ['iPhone', 390], ['large Android', 412],
@@ -49,8 +49,8 @@ describe.each([
   });
 });
 
-test('a 390 px phone gets the approved 238 px title', () => {
-  expect(titleWidthFor(390)).toBe(238);
+test('a 390 px phone gets the full-size title', () => {
+  expect(titleWidthFor(390)).toBe(226);
 });
 
 test('tab labels grow only a little under a large system font', () => {
