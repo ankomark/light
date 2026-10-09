@@ -74,9 +74,10 @@ class R2SignEndpointTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     @override_settings(R2_ACCESS_KEY_ID='')
-    def test_unconfigured_returns_500(self):
+    def test_unconfigured_returns_503(self):
         res = self._sign({'type': 'image', 'content_type': 'image/jpeg'})
-        self.assertEqual(res.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(res.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(res.data['code'], 'uploads_unavailable')
 
 
 @override_settings(**R2_TEST_SETTINGS)

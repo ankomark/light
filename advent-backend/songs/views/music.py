@@ -38,8 +38,10 @@ class R2SignView(APIView):
             return Response({'error': f'Unknown upload type: {upload_type}'},
                             status=status.HTTP_400_BAD_REQUEST)
         if not r2.is_configured():
-            return Response({'error': 'R2 not configured'},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            # Storage keys not set on this server: unavailable, not a crash.
+            return Response({'error': 'Uploads are unavailable right now.',
+                             'code': 'uploads_unavailable'},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         content_type = (request.data.get('content_type') or '').strip().lower()
         if not content_type:
