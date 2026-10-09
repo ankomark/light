@@ -2478,6 +2478,8 @@ export const STRINGS = {
     'live.expoGoNote': 'Live broadcasting uses native WebRTC, which isn’t available in Expo Go. Open a development build to go live or watch.',
     'live.connecting': 'Connecting…',
     'live.reconnecting': 'Reconnecting…',
+    'live.hideControls': 'Hide chat and controls',
+    'live.showControls': 'Show chat and controls',
     'live.requestsToJoin': 'Requests to join',
     // On-screen graphic composer (host/co-host authoring sheet).
     'live.graphic.title': 'On-screen text',
@@ -8027,6 +8029,8 @@ export const STRINGS = {
     'live.expoGoNote': 'Matangazo ya moja kwa moja hutumia WebRTC asilia, ambayo haipatikani katika Expo Go. Fungua toleo la maendeleo ili kutangaza au kutazama.',
     'live.connecting': 'Inaunganisha…',
     'live.reconnecting': 'Inaunganisha tena…',
+    'live.hideControls': 'Ficha gumzo na vidhibiti',
+    'live.showControls': 'Onyesha gumzo na vidhibiti',
     'live.requestsToJoin': 'Maombi ya kujiunga',
     'live.graphic.title': 'Maandishi ya skrini',
     'live.graphic.style': 'Mtindo',

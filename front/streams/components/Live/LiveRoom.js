@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
-  useWindowDimensions, AppState, Share,
+  useWindowDimensions, AppState, Share, Pressable, StatusBar,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -351,6 +351,8 @@ const RoomInner = ({
   const [graphic, setGraphic] = useState(broadcast.overlay || null);
   const graphicRef = useRef(broadcast.overlay || null); // current, to re-send to late joiners
   const [graphicOpen, setGraphicOpen] = useState(false);
+  // Landscape: a tap on the picture hides everything over it (and brings it back).
+  const [chromeHidden, setChromeHidden] = useState(false);
   const [dockH, setDockH] = useState(0); // measured dock height, to anchor the overlay above it
 
   const toggleFollow = useCallback(async () => {
@@ -1033,7 +1035,7 @@ const RoomInner = ({
   ) : null;
 
   const stageNode = stuck ? (
-    <View style={[styles.connecting, styles.stuck, !landscape && styles.centerFill]} testID="live-stuck">
+    <View style={[styles.connecting, styles.stuck, styles.centerFill]} testID="live-stuck">
       <MaterialCommunityIcons name="access-point-network-off" size={40} color={live.inkDim} />
       <Text style={styles.connectingText}>{t('live.cantConnect')}</Text>
       <View style={styles.stuckRow}>
@@ -1050,7 +1052,7 @@ const RoomInner = ({
       </View>
     </View>
   ) : connecting ? (
-    <View style={[styles.connecting, !landscape && styles.centerFill]}>
+    <View style={[styles.connecting, styles.centerFill]}>
       <ActivityIndicator color={live.gold} />
       <Text style={styles.connectingText}>{t('live.connecting')}</Text>
     </View>
@@ -1066,7 +1068,7 @@ const RoomInner = ({
       fill={!landscape}
     />
   ) : (
-    <View style={[styles.speakerWrap, !landscape && styles.speakerWrapFull]}>
+    <View style={[styles.speakerWrap, styles.speakerWrapFull]}>
       {publishers.map((p) => (
         <View key={p.identity} style={styles.speaker}>
           <View style={[styles.speakerAvatar, p.isSpeaking && styles.speakerActive]}>
@@ -1179,33 +1181,60 @@ const RoomInner = ({
     </>
   );
 
-  // ── Landscape: video fills the left, a chat/controls panel on the right ──────
+  // ── Landscape: full screen, like a TikTok or YouTube live on its side ────────
+  // The video fills the whole screen and everything else floats over it: the
+  // header and host across the top, chat + requests + controls on the right.
+  // A tap on the picture hides all of it for a clean view (a tap brings it back).
   if (landscape) {
+    const sideL = insets.left + spacing.sm;
+    const sideR = insets.right + spacing.sm;
     return (
-      <View style={[styles.inner, styles.innerLandscape, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.sm }]}>
-        <View style={styles.mainCol}>
-          {headerNode}
-          {hostRowNode}
-          {reconnectNode}
-          {stageNode}
-          <LiveGraphic
-            graphic={graphic}
-            insets={insets}
-            bottomOffset={insets.bottom + spacing.lg}
-            kbHeight={kbHeight}
-            editable={canPublish}
-            onReposition={(pos) => publishGraphic({ ...graphicRef.current, ...pos })}
-          />
-        </View>
-        <View style={[styles.sidePanel, { marginBottom: kbHeight }]}>
-          {inboxNode}
-          <View style={[styles.bottomRow, styles.bottomRowLandscape]}>
-            <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat}
-              {...chatExtras} />
+      <View style={styles.portraitRoot}>
+        <StatusBar hidden />
+        <View style={styles.bgStage}>{stageNode}</View>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => setChromeHidden((h) => !h)}
+          accessibilityRole="button"
+          accessibilityLabel={t(chromeHidden ? 'live.showControls' : 'live.hideControls')}
+          testID="live-landscape-toggle"
+        />
+        <LiveGraphic
+          graphic={graphic}
+          insets={insets}
+          bottomOffset={insets.bottom + spacing.lg}
+          kbHeight={kbHeight}
+          editable={canPublish}
+          onReposition={(pos) => publishGraphic({ ...graphicRef.current, ...pos })}
+        />
+        {/* Hearts keep floating up even in the clean view. */}
+        <View style={[styles.landscapePanel, { top: insets.top + 64, bottom: insets.bottom + spacing.sm + kbHeight, right: sideR }]}
+          pointerEvents="box-none">
+          {!chromeHidden && inboxNode}
+          <View style={[styles.bottomRow, styles.bottomRowLandscape]} pointerEvents="box-none">
+            {!chromeHidden && (
+              <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat}
+                {...chatExtras} />
+            )}
             <FloatingReactions ref={reactionsRef} />
           </View>
-          {controlsNode}
+          {!chromeHidden && controlsNode}
         </View>
+        {chromeHidden ? (
+          <View style={[styles.liveCorner, { top: insets.top + spacing.sm, left: sideL }]} pointerEvents="none">
+            <LiveBadge />
+          </View>
+        ) : (
+          <LinearGradient
+            colors={live.gradScrimTop}
+            style={[styles.topScrim, { paddingTop: insets.top + spacing.sm, paddingLeft: sideL, paddingRight: sideR }]}
+            pointerEvents="box-none"
+          >
+            {headerNode}
+            {hostRowNode}
+          </LinearGradient>
+        )}
+        {reconnecting && <View style={styles.reconnectFloat} pointerEvents="none">{reconnectNode}</View>}
         {extrasNode}
         {canPublish && (
           <GraphicComposer
@@ -1283,6 +1312,9 @@ const RoomInner = ({
 
 // Video: large active-speaker tile + a thumbnail row of the other publishers.
 const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentity, onKick, landscape, fill }) => {
+  // Landscape is full screen: the whole picture, fitted (a host filming upright
+  // shows complete between dark bars), never cropped to a zoomed-in strip.
+  const fit = landscape ? 'contain' : 'cover';
   const others = publishers.filter((p) => p.identity !== spotlight?.identity);
   // `cover` = the spotlight fills its container edge-to-edge (landscape, or the
   // portrait full-bleed layout). Otherwise it's a 16:10 tile with a thumbnail row.
@@ -1294,7 +1326,8 @@ const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentit
           participant={spotlight}
           trackRef={camByIdentity[spotlight.identity]}
           big
-          bigStyle={cover ? styles.spotlightFill : null}
+          fit={fit}
+          bigStyle={cover ? [styles.spotlightFill, landscape && styles.spotlightBleed] : null}
           showKick={isHost && spotlight.identity !== localIdentity}
           onKick={onKick}
         />
@@ -1312,9 +1345,10 @@ const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentit
           ))}
         </ScrollView>
       )}
-      {/* Portrait full-bleed: co-hosts float as small picture-in-picture tiles. */}
-      {fill && others.length > 0 && (
-        <View style={styles.floatThumbs} pointerEvents="box-none">
+      {/* Full screen: co-hosts float as small picture-in-picture tiles (on the
+          left in landscape, clear of the chat). */}
+      {cover && others.length > 0 && (
+        <View style={[styles.floatThumbs, landscape && styles.floatThumbsLeft]} pointerEvents="box-none">
           {others.slice(0, 3).map((p) => (
             <PublisherTile
               key={p.identity}
@@ -1330,7 +1364,7 @@ const VideoStage = ({ spotlight, publishers, camByIdentity, isHost, localIdentit
   );
 };
 
-const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick }) => {
+const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick, fit = 'cover' }) => {
   // Render only when there's an actual subscribed track that isn't muted. A bare
   // placeholder ref (publication without a track) must fall back to the avatar,
   // not try to draw an empty video — that's what hid a co-host's late video.
@@ -1338,7 +1372,7 @@ const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick 
   return (
     <View style={[big ? styles.spotlightTile : styles.thumbTile, big && bigStyle, participant.isSpeaking && styles.tileSpeaking]}>
       {hasVideo ? (
-        <VideoTrack trackRef={trackRef} style={styles.video} objectFit="cover" />
+        <VideoTrack trackRef={trackRef} style={styles.video} objectFit={fit} />
       ) : (
         <View style={styles.videoOff}>
           <MaterialCommunityIcons name="account" size={big ? 64 : 30} color={live.inkDim} />
@@ -1363,12 +1397,14 @@ const PublisherTile = ({ participant, trackRef, big, bigStyle, showKick, onKick 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: live.bg },
   inner: { flex: 1, paddingHorizontal: spacing.md },
-  // Landscape: video on the left, a chat/controls side panel on the right.
-  innerLandscape: { flexDirection: 'row' },
-  mainCol: { flex: 1 },
-  sidePanel: { width: '40%', maxWidth: 340, marginLeft: spacing.sm },
   videoStageFill: { flex: 1 },
   spotlightFill: { flex: 1, aspectRatio: undefined, width: '100%' },
+  // Landscape full screen: edge to edge, no rounded frame.
+  spotlightBleed: { borderRadius: 0, borderWidth: 0 },
+  floatThumbsLeft: { right: undefined, left: spacing.md, top: 72 },
+  // Landscape: chat, requests and controls float on the right, over the video.
+  landscapePanel: { position: 'absolute', width: '38%', maxWidth: 320, zIndex: 3 },
+  liveCorner: { position: 'absolute', zIndex: 3 },
   bottomRowLandscape: { flex: 1 },
   controlsLandscape: { flexWrap: 'wrap', justifyContent: 'center' },
 

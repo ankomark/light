@@ -447,3 +447,33 @@ describe('Live summary and joining speed', () => {
     expect(navigation.navigate).toHaveBeenCalledWith('LiveRoom', expect.objectContaining({ token: 'tok' }));
   });
 });
+
+describe('Live room on its side (landscape)', () => {
+  const RN = require('react-native');
+  const broadcast = { id: 4, kind: 'meet', title: 'Sabbath vespers', host: { id: 1, username: 'pastor' } };
+  const bytes = (obj) => Uint8Array.from(unescape(encodeURIComponent(JSON.stringify(obj))), (c) => c.charCodeAt(0));
+  const open = () => render(<LiveRoom navigation={nav()}
+    route={{ params: { url: 'wss://x', token: 't', broadcast, role: 'viewer' } }} />);
+  let dims;
+  beforeEach(() => { dims = jest.spyOn(RN, 'useWindowDimensions').mockReturnValue({ width: 844, height: 390, scale: 3, fontScale: 1 }); });
+  afterEach(() => dims.mockRestore());
+
+  test('full screen: chat and controls float over the picture, a tap hides them and a tap brings them back', () => {
+    const screen = open();
+    expect(screen.getByPlaceholderText('live.chatPlaceholder')).toBeTruthy();
+    expect(screen.getByTestId('live-heart')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('live-landscape-toggle'));
+    expect(screen.queryByPlaceholderText('live.chatPlaceholder')).toBeNull();
+    expect(screen.queryByTestId('live-heart')).toBeNull();
+    fireEvent.press(screen.getByTestId('live-landscape-toggle'));
+    expect(screen.getByPlaceholderText('live.chatPlaceholder')).toBeTruthy();
+  });
+
+  test('hearts still float up in the clean view', () => {
+    mockFloated.length = 0;
+    const screen = open();
+    fireEvent.press(screen.getByTestId('live-landscape-toggle'));
+    act(() => { (mockRoom.handlers.data || []).forEach((fn) => fn(bytes({ t: 'react', emoji: '🙏' }), { identity: 'u9', name: 'mary' })); });
+    expect(mockFloated).toContain('🙏');
+  });
+});
