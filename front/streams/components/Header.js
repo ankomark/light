@@ -33,7 +33,7 @@ const BIBLE_ART = require('../assets/bible-icon.png');
 const TITLE_ART = require('../assets/title-cinematic.png');
 const TITLE_RATIO = 900 / 175;
 // How round the header's lower corners are.
-const CURVE = 18;
+const CURVE = 12;
 
 // The title artwork's width: whatever the row leaves between the medallion and
 // the Videos + menu icons (padding 2x18, medallion 32, title margins 2x6, icons
