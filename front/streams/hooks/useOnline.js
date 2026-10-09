@@ -40,6 +40,26 @@ const start = () => {
 /** The last known state, for code outside React. */
 export const isOnline = () => current;
 
+/**
+ * Asks the OS now rather than trusting the last event — at launch no event has
+ * arrived yet and `current` is still the optimistic `true`. Never waits more
+ * than a moment: an unanswered question counts as the last known state.
+ */
+export const checkOnline = async (waitMs = 1500) => {
+  if (!NetInfo?.fetch) return current;
+  try {
+    const state = await Promise.race([
+      NetInfo.fetch(),
+      new Promise((resolve) => { setTimeout(() => resolve(undefined), waitMs); }),
+    ]);
+    if (state === undefined) return current;
+    start();
+    return toOnline(state);
+  } catch {
+    return current;
+  }
+};
+
 /** Call `fn(online)` on every change; returns the unsubscribe. */
 export const onOnlineChange = (fn) => {
   start();

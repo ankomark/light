@@ -133,3 +133,34 @@ test('a status blip right after login is asked again, not taken as "unverified"'
   await act(async () => { result = await auth.login('mark', 'pw'); });
   expect(result).toEqual({ isVerified: true, hasProfile: true });
 });
+
+test('signed in before: the app opens at once, without waiting for the server', async () => {
+  online();
+  let screen = render(<AuthProvider><Probe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText('in:mark')).toBeTruthy());
+  screen.unmount();
+
+  // A network that is "connected" but answers nothing: the check never returns.
+  mockAxios.get.mockImplementation(() => new Promise(() => {}));
+  screen = render(<AuthProvider><Probe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText('in:mark')).toBeTruthy());
+});
+
+test('opened at once, then the server refuses the session: signed out', async () => {
+  online();
+  let screen = render(<AuthProvider><Probe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText('in:mark')).toBeTruthy());
+  screen.unmount();
+
+  mockAxios.get.mockRejectedValue(Object.assign(new Error('401'), { response: { status: 401 } }));
+  mockAxios.post.mockRejectedValue(Object.assign(new Error('401'), { response: { status: 401 } }));
+  screen = render(<AuthProvider><Probe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText('out')).toBeTruthy());
+});
+
+test('the startup checks have a time limit', async () => {
+  online();
+  render(<AuthProvider><Probe /></AuthProvider>);
+  await waitFor(() => expect(mockAxios.get).toHaveBeenCalled());
+  for (const [, config] of mockAxios.get.mock.calls) expect(config.timeout).toBeLessThanOrEqual(10000);
+});

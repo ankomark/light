@@ -129,6 +129,8 @@ export const dedupeAppend = (prev, more) => {
 // of drift on a social feed is invisible — the revalidation lands a moment
 // later anyway — but a day-old feed opening as if it were current is not.
 const FEED_MAX_AGE_MS = 30 * 60 * 1000;
+// When the feed can't be fetched at all: any kept copy beats an empty page.
+const KEPT_FEED_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 const processPost = (post, existingFollowStates = {}) => {
   if (!post.user || typeof post.user !== 'object') {
@@ -287,6 +289,15 @@ const PostMedia = React.memo(function PostMedia({
   const [currentUrl, setCurrentUrl] = useState(item.mediaUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  // A photo or video this phone never kept can't load offline. The card keeps
+  // its shape and says so, and tries again by itself when the network is back.
+  const online = useOnline();
+  useEffect(() => {
+    if (!online || !hasError) return;
+    setHasError(false);
+    setIsLoading(true);
+    setCurrentUrl(item.mediaUrl);
+  }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
   // Video-only: the poster stays painted on top of the <Video> until the decoder
   // has a real first frame to show (onReadyForDisplay). This kills the black flash
   // between the thumbnail and playback — see the video branch below.
@@ -407,6 +418,22 @@ const PostMedia = React.memo(function PostMedia({
       .onEnd(() => burstLike());
     return Gesture.Exclusive(doubleTap, singleTap);
   }, [burstLike]);
+
+  if (hasError && !online) {
+    const poster = item.content_type === 'video' ? item.thumbnailUrl : null;
+    return (
+      <View style={[styles.mediaContainer, styles.offlineMedia, { aspectRatio }]} testID="feed-media-offline">
+        {!!poster && (
+          <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} contentFit="cover"
+                 cachePolicy="memory-disk" recyclingKey={String(item.id)} />
+        )}
+        <View style={styles.offlineMediaBadge}>
+          <MaterialIcons name={item.content_type === 'video' ? 'videocam-off' : 'cloud-off'} size={22} color="#FFC46B" />
+          <Text style={styles.offlineMediaText}>{t('feed.mediaOffline')}</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!currentUrl || hasError) {
     return (
@@ -871,6 +898,16 @@ const SocialFeed = ({ showBackground = true }) => {
       // No popup: what is on screen stays, a slim banner says what happened
       // and offers Retry (renderEmptyComponent covers an empty screen).
       setError(err);
+      // Nothing on screen and the server unreachable (a network that is
+      // "connected" but has no internet looks online): the last feed this
+      // phone kept, however old, rather than an empty page.
+      if (!postsRef.current.length && !searchRef.current) {
+        const kept = await readCache(cacheKey, KEPT_FEED_MAX_AGE_MS);
+        if (!stale() && Array.isArray(kept) && kept.length && !postsRef.current.length) {
+          postsKeyRef.current = cacheKey;
+          setPosts(kept);
+        }
+      }
     } finally {
       if (!stale()) {
         loadingRef.current = false;
@@ -1430,18 +1467,26 @@ const SocialFeed = ({ showBackground = true }) => {
 
   const renderEmptyComponent = useCallback(() => {
     if (loading) return null;
-    if (error) {
+    if (error || !online) {
+      // Nothing kept to show. Offline gets its own plain words (and comes back
+      // by itself when the network does); a server problem says so.
+      const offline = !online || !error?.response;
       return (
-        <View style={styles.emptyContainer}>
-          <MaterialIcons name="error-outline" size={48} color={colors.textMuted} />
+        <View style={[styles.emptyContainer, styles.problemContainer]} testID="feed-problem">
+          <View style={styles.problemIcon}>
+            <MaterialIcons name={offline ? 'cloud-off' : 'error-outline'} size={30} color="#FFC46B" />
+          </View>
           <Text style={styles.errorText}>
-            {error.message?.includes('Session expired')
-              ? t('feed.sessionExpired')
-              : error.response?.status === 500
-                ? t('feed.serverError')
-                : t('feed.loadFailedShort')}
+            {offline
+              ? t('feed.offlineTitle')
+              : error.message?.includes('Session expired')
+                ? t('feed.sessionExpired')
+                : error.response?.status >= 500
+                  ? t('feed.serverError')
+                  : t('feed.loadFailedShort')}
           </Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => loadPosts()}>
+          {offline && <Text style={styles.emptySub}>{t('feed.offlineSub')}</Text>}
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadPosts(true)}>
             <Text style={styles.retryButtonText}>{t('common.retry')}</Text>
           </TouchableOpacity>
         </View>
@@ -1476,7 +1521,7 @@ const SocialFeed = ({ showBackground = true }) => {
         </TouchableOpacity>
       </View>
     );
-  }, [loading, error, searchQuery, feedType, navigation, loadPosts, selectFeed, t]);
+  }, [loading, error, online, searchQuery, feedType, navigation, loadPosts, selectFeed, t]);
 
   const keyExtractor = useCallback(item => `post_${item.id}`, []);
 
@@ -1757,10 +1802,11 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
 
+  // Empty: the message sits just under the stories bar, not centred in a list
+  // as tall as the screen (which pushed it toward the bottom, past the fold on
+  // a short phone).
   emptyListContent: {
     flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 
   postContainer: {
@@ -1973,6 +2019,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
 
+  offlineMedia: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(10,22,40,0.85)',
+  },
+
+  offlineMediaBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999,
+    backgroundColor: 'rgba(10,22,40,0.82)',
+    borderWidth: 1, borderColor: 'rgba(255,196,107,0.35)',
+  },
+
+  offlineMediaText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+
   errorMediaContainer: {
     width: '100%',
     aspectRatio: 1,
@@ -2062,6 +2123,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
+  },
+
+  problemContainer: {
+    marginTop: 24,
+    marginHorizontal: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(10,22,40,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,196,107,0.30)',
+  },
+
+  problemIcon: {
+    width: 56, height: 56, borderRadius: 28,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,196,107,0.12)',
   },
 
   emptyText: {

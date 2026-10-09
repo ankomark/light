@@ -18,6 +18,7 @@
 // NOT: anything where stale is wrong rather than merely old — balances, auth
 // state, moderation decisions.
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { checkOnline } from '../hooks/useOnline';
 
 const PREFIX = '@cache:';
 
@@ -29,6 +30,13 @@ const SCHEMA = 'v1';
 // stale paint and show the skeleton, because content old enough to be wrong is
 // worse than a brief wait.
 const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// Offline, an old copy beats an empty screen: the age limits above only hold
+// while a fresh copy can actually be fetched. Past this, not even offline.
+const OFFLINE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Too old for an online paint: still worth showing when the phone is offline.
+const usableStale = async (at) => Date.now() - at <= OFFLINE_MAX_AGE_MS && !(await checkOnline());
 
 const memory = new Map();
 
@@ -43,18 +51,20 @@ export const peekCache = (key) => {
 
 /**
  * Last stored payload for `key`, or null when absent, unreadable or older than
- * `maxAgeMs`. Never throws: a cache miss must degrade to a normal fetch, not an
- * error screen.
+ * `maxAgeMs` - unless the phone is offline, when any copy up to a month old is
+ * returned (the screen still fetches; it just isn't blank meanwhile). Never
+ * throws: a cache miss must degrade to a normal fetch, not an error screen.
  */
 export const readCache = async (key, maxAgeMs = DEFAULT_MAX_AGE_MS) => {
   const hit = memory.get(key);
   if (hit && Date.now() - hit.at <= maxAgeMs) return hit.data;
+  if (hit && await usableStale(hit.at)) return hit.data;
   try {
     const raw = await AsyncStorage.getItem(fullKey(key));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed.at !== 'number') return null;
-    if (Date.now() - parsed.at > maxAgeMs) return null;
+    if (Date.now() - parsed.at > maxAgeMs && !(await usableStale(parsed.at))) return null;
     memory.set(key, parsed);
     return parsed.data;
   } catch {

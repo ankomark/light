@@ -26,8 +26,9 @@ jest.mock('@react-navigation/native', () => ({
 }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 24, left: 0, right: 0 }) }));
 const mockWriteCache = jest.fn();
+const mockReadCache = jest.fn(async () => null);
 jest.mock('../../utils/screenCache', () => ({
-  peekCache: () => null, readCache: async () => null, writeCache: (...a) => mockWriteCache(...a), userKey: (u, n) => `u${u}:${n}`,
+  peekCache: () => null, readCache: (...a) => mockReadCache(...a), writeCache: (...a) => mockWriteCache(...a), userKey: (u, n) => `u${u}:${n}`,
 }));
 const mockOnline = { value: true };
 jest.mock('../../hooks/useOnline', () => ({ __esModule: true, default: () => mockOnline.value }));
@@ -56,6 +57,8 @@ beforeEach(() => {
   mockApi.fetchFeedByUrl.mockReset();
   mockApi.fetchFeedByUrl.mockResolvedValue({ results: [], next: null });
   mockOnline.value = true;
+  mockReadCache.mockReset();
+  mockReadCache.mockResolvedValue(null);
 });
 
 test('dedupeAppend keeps order and drops what is already there', () => {
@@ -135,4 +138,23 @@ test('a double-tap only ever likes: it asks for "liked", never a toggle', async 
   await act(async () => { fireEvent.press(tap); fireEvent.press(tap); });
   expect(mockApi.likePost).toHaveBeenCalledWith(6, { liked: true });
   await waitFor(() => expect(screen.UNSAFE_getByType(FlatList).props.data[0]).toMatchObject({ is_liked: true, likes_count: 3 }));
+});
+
+test('offline with nothing kept: says "You are offline" plainly, with Retry', async () => {
+  mockOnline.value = false;
+  mockApi.fetchSocialPosts.mockRejectedValue(Object.assign(new Error('Network Error'), { response: undefined }));
+  const screen = render(<SocialFeed showBackground={false} />);
+  await waitFor(() => expect(screen.getByTestId('feed-problem')).toBeTruthy());
+  expect(screen.getByText('feed.offlineTitle')).toBeTruthy();
+  expect(screen.queryByText('feed.loadFailedShort')).toBeNull();
+});
+
+test('the server unreachable and nothing on screen: the last kept feed, however old', async () => {
+  mockApi.fetchSocialPosts.mockRejectedValue(Object.assign(new Error('timeout of 15000ms exceeded'), { code: 'ECONNABORTED' }));
+  // The quick paint finds nothing fresh; the fallback asks for any age.
+  mockReadCache.mockImplementation(async (key, maxAge) => (maxAge > 24 * 60 * 60 * 1000 ? [post(41), post(42)] : null));
+  const screen = render(<SocialFeed showBackground={false} />);
+  await waitFor(() => expect(screen.UNSAFE_getByType(FlatList).props.data.map((p) => p.id)).toEqual([41, 42]));
+  expect(screen.queryByTestId('feed-problem')).toBeNull();
+  expect(screen.getByTestId('offline-banner')).toBeTruthy();        // and says it couldn't refresh
 });

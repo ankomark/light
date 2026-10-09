@@ -1386,6 +1386,7 @@ export const STRINGS = {
     'follow.noFollowers': 'No followers yet',
 
     'feed.mediaUnavailable': 'Media unavailable',
+    'feed.mediaOffline': 'Shows when you are back online',
     'feed.retry': 'Retry',
     'feed.followingQuiet': 'Your following feed is quiet',
     'feed.followingQuietSub': "Follow people, or see what everyone's posting.",
@@ -2313,6 +2314,8 @@ export const STRINGS = {
     'feed.sessionExpired': 'Session expired. Please log in again.',
     'feed.serverError': 'Server error. Please try again.',
     'feed.loadFailedShort': 'Failed to load posts.',
+    'feed.offlineTitle': "You're offline",
+    'feed.offlineSub': 'New posts load by themselves as soon as you are back online.',
     'track.selectAudioFailed': 'Failed to select audio',
     'track.selectImageFailed': 'Failed to select image',
     'track.optimizing': 'Optimizing audio...',
@@ -6933,6 +6936,7 @@ export const STRINGS = {
     'follow.noFollowers': 'Hakuna wafuasi bado',
 
     'feed.mediaUnavailable': 'Maudhui hayapatikani',
+    'feed.mediaOffline': 'Itaonekana ukirudi mtandaoni',
     'feed.retry': 'Jaribu tena',
     'feed.followingQuiet': 'Mlisho wa unaowafuata ni kimya',
     'feed.followingQuietSub': 'Fuata watu, au ona kile wengine wanachochapisha.',
@@ -7860,6 +7864,8 @@ export const STRINGS = {
     'feed.sessionExpired': 'Kipindi kimeisha. Tafadhali ingia tena.',
     'feed.serverError': 'Hitilafu ya seva. Tafadhali jaribu tena.',
     'feed.loadFailedShort': 'Imeshindwa kupakia machapisho.',
+    'feed.offlineTitle': 'Huna mtandao',
+    'feed.offlineSub': 'Machapisho mapya yatapakia yenyewe mara utakaporudi mtandaoni.',
     'track.selectAudioFailed': 'Imeshindwa kuchagua sauti',
     'track.selectImageFailed': 'Imeshindwa kuchagua picha',
     'track.optimizing': 'Inaboresha sauti...',

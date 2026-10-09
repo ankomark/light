@@ -9,7 +9,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from '../services/secureStorage'; // web-safe shim (expo-secure-store stubs web)
-import axios from 'axios';
+import axios from 'axios';
 import '../utils/deviceHeaders'; // names this phone on sign-in and refresh
 import { API_URL, storeTokens, clearTokens } from '../services/api';
 import { clearAllCaches } from '../utils/screenCache';
@@ -52,9 +52,15 @@ const processProfilePicture = (picture, size = 200) => {
   return null;
 };
 
+// Startup and session checks give up after this: on a network that is
+// connected but has no internet a request otherwise hangs until the phone's
+// own limit, and nobody should wait that long to learn they are offline.
+const CHECK_TIMEOUT_MS = 8000;
+
 const fetchUserProfile = async (token) => {
   const response = await axios.get(`${API_URL}/profiles/me/`, {
     headers: { Authorization: `Bearer ${token}` },
+    timeout: CHECK_TIMEOUT_MS,
   });
 
   return {
@@ -70,6 +76,7 @@ const fetchUserProfile = async (token) => {
 const fetchAuthStatus = async (token) => {
   const response = await axios.get(`${API_URL}/auth/status/`, {
     headers: { Authorization: `Bearer ${token}` },
+    timeout: CHECK_TIMEOUT_MS,
   });
   return response.data; // { id, username, email, is_email_verified, has_profile }
 };
@@ -152,6 +159,15 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
+      // Signed in last time: open the app now, as that session, and check it
+      // with the server behind it. Waiting for the server first is what made
+      // an offline (or slow) launch sit on a spinner. Only the server refusing
+      // the session signs out, below - an unreachable server never does.
+      if ((await readLast())?.status) {
+        await applyLast();
+        setIsLoading(false);
+      }
+
       // Verify the access token via the status endpoint (works without a profile).
       try {
         await applyStatus(accessToken, await fetchAuthStatus(accessToken));
@@ -162,7 +178,7 @@ export const AuthProvider = ({ children }) => {
           try {
             const response = await axios.post(`${API_URL}/auth/token/refresh/`, {
               refresh: refreshToken,
-            });
+            }, { timeout: CHECK_TIMEOUT_MS });
             // Persist the rotated refresh token (server blacklists the old one).
             await storeTokens(response.data.access, response.data.refresh || refreshToken);
             await applyStatus(response.data.access, await fetchAuthStatus(response.data.access));
