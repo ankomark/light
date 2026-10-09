@@ -116,7 +116,9 @@ const Header = ({ transparentBg = false }) => {
         pointerEvents="none"
       />
 
-      <SafeAreaView edges={['top']} style={styles.safeArea}>
+      {/* Clear of the status bar and notch on top, and of a side notch or
+          rounded corner where a tablet shows it sideways. */}
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
         <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
         <View style={styles.header}>
