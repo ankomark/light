@@ -119,7 +119,10 @@
         {
           "photosPermission": "Allow $(PRODUCT_NAME) to save songs and media to your phone.",
           "savePhotosPermission": "Allow $(PRODUCT_NAME) to save songs and media to your phone.",
-          "granularPermissions": ["audio", "photo"]
+          "granularPermissions": [
+            "audio",
+            "photo"
+          ]
         }
       ],
       "expo-audio",
@@ -142,6 +145,14 @@
         "projectId": "ce25330b-30db-4e8c-b99b-c03d70772178"
       }
     },
-    "owner": "ankomark"
+    "owner": "ankomark",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ce25330b-30db-4e8c-b99b-c03d70772178",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    }
   }
 }

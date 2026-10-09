@@ -15,7 +15,8 @@
       },
       "env": {
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
-      }
+      },
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
@@ -26,7 +27,8 @@
         "EXPO_PUBLIC_API_BASE": "https://api.adventistlife.app",
         "EXPO_PUBLIC_PUBLIC_BASE": "https://api.adventistlife.app",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "env": {
@@ -45,7 +47,8 @@
         "image": "latest",
         "autoIncrement": "version",
         "enterpriseProvisioning": "universal"
-      }
+      },
+      "channel": "production"
     }
   }
 }
