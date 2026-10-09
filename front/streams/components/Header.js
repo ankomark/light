@@ -123,8 +123,9 @@ const Header = ({ transparentBg = false }) => {
         {/* Top row: logo left, title centered in the middle (equal gaps to the
             logo and the icons), video + menu right. */}
         <View style={[styles.topRow, { maxWidth: rowMaxWidth, alignSelf: 'center', width: '100%' }]}>
-          {/* Brand mark set in a gold-rimmed ivory medallion — a coin/seal look
-              that lifts the emblem off the dark glass for a luxury feel. */}
+          {/* Trying the header without the medallion (commented out, not
+              removed). Brand mark set in a gold-rimmed ivory medallion — a
+              coin/seal look that lifts the emblem off the dark glass.
           <LinearGradient
             colors={['#F4DE9B', '#C99A2E', '#8C6A1A', '#E7C871']}
             start={{ x: 0, y: 0 }}
@@ -135,6 +136,7 @@ const Header = ({ transparentBg = false }) => {
               <Image source={require('../assets/logo-mark.png')} style={styles.logo} resizeMode="contain" />
             </View>
           </LinearGradient>
+          */}
 
           {/* The cinematic title fills the space between the medallion and the
               icons and centers within it — equal room on both sides. */}
