@@ -65,7 +65,10 @@ jest.mock('../../components/GlassView', () => {
 const mockDownloads = { count: 3, bytes: 12 * 1024 * 1024 };
 const mockRemoveAll = jest.fn(async () => 3);
 let mockWallOn = true;
-jest.mock('../../context/WallpaperContext', () => ({ useWallpapersOn: () => mockWallOn }));
+jest.mock('../../context/WallpaperContext', () => ({
+  useWallpapersOn: () => mockWallOn,
+  useWallpapers: () => ({ wallpapers: [], refresh: async () => {} }),
+}));
 jest.mock('../../utils/downloads', () => ({
   useDownloadsSummary: () => mockDownloads, removeAllDownloads: (...a) => mockRemoveAll(...a),
 }));

@@ -47,7 +47,8 @@ import {
 import { PREF_KEYS, AUDIO_QUALITY_TIERS_AVAILABLE } from '../utils/preferences';
 import { usePreferences } from '../context/PreferencesContext';
 import { useI18n } from '../context/I18nContext';
-import { useWallpapersOn } from '../context/WallpaperContext';
+import { useWallpapersOn, useWallpapers } from '../context/WallpaperContext';
+import RotatingBackground from '../components/RotatingBackground';
 import { typography, spacing, radius, shadows } from '../constants/theme';
 
 const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
@@ -57,7 +58,9 @@ const APP_NAME = Constants.expoConfig?.name || 'Adventist Life';
 // what is switched on.
 const SETTINGS_COLORS = {
   bg: '#000000',
-  card: '#13233B',
+  // A touch see-through so a wallpaper shows faintly through; on the black
+  // ground it reads the same navy.
+  card: 'rgba(19,35,59,0.92)',
   border: '#1E3150',
   inputBg: '#1E3150',
   sheet: '#0F1C30',
@@ -601,6 +604,10 @@ const Settings = ({ route } = {}) => {
   // Wallpapers on (the admins' pictures, changing as designed) or off (the
   // app's own plain background), for every page that has one.
   const wallpaperOn = useWallpapersOn();
+  // Settings wears the wallpaper too, like the other pages. Black ground only
+  // when they're off or the admins have curated none.
+  const { wallpapers } = useWallpapers('general');
+  const showWallpaper = wallpapers.length > 0;
 
   const resetPwForm = () => { setCurrentPw(''); setNewPw(''); setConfirmPw(''); };
 
@@ -760,9 +767,16 @@ const Settings = ({ route } = {}) => {
 
   return (
     <View style={styles.root}>
-      {/* Light clock and battery on the black page, even in the light theme. */}
-      <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
-      <SafeAreaView edges={['top']} style={styles.header}>
+      {showWallpaper && (
+        <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.55)" />
+      )}
+      {/* Light clock and battery on the page, even in the light theme. */}
+      <StatusBar
+        barStyle="light-content"
+        translucent={showWallpaper}
+        backgroundColor={showWallpaper ? 'transparent' : colors.bg}
+      />
+      <SafeAreaView edges={['top']} style={[styles.header, showWallpaper && styles.headerClear]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={[styles.backBtn, styles.backRound]}
@@ -1571,6 +1585,7 @@ const makeStyles = (colors) => StyleSheet.create({
     paddingBottom: spacing.sm,
     backgroundColor: colors.bg,
   },
+  headerClear: { backgroundColor: 'transparent' },
   backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
   backRound: { borderRadius: 22, backgroundColor: colors.card },
   headerTitle: { fontSize: 18, fontWeight: '800', letterSpacing: 0.3, color: colors.textPrimary },
