@@ -68,7 +68,8 @@ function sectionLabel(dateStr) {
   return 'Earlier';
 }
 
-const NotificationsBell = ({ navigation }) => {
+// size/color: the header draws it like its other tab icons.
+const NotificationsBell = ({ navigation, size = 24, color = '#fff' }) => {
   const { t } = useI18n();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -293,7 +294,7 @@ const NotificationsBell = ({ navigation }) => {
         onPress={() => { setShowPanel(true); loadNotifications(); }}
         activeOpacity={0.7}
       >
-        <Ionicons name="notifications-outline" size={24} color="#fff" />
+        <Ionicons name="notifications-outline" size={size} color={color} />
         {unreadCount > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>

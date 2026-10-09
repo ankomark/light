@@ -43,26 +43,29 @@ test('Market is third in the row, where Explore was, and opens the marketplace',
   expect(mockNav.navigate).toHaveBeenCalledWith('MarketplaceHome');
 });
 
-test('Market wears the coloured marketplace picture, and is lit on the marketplace', () => {
+test('Market is a storefront icon, filled and lit on the marketplace', () => {
   mockRoute = 'MarketplaceHome';
   const screen = render(<Header />);
   const market = screen.getByTestId('nav-market');
   expect(market.props.accessibilityState).toEqual({ selected: true });
-  expect(screen.queryByText(/icon:storefront/)).toBeNull();   // a picture, not a glyph
+  expect(screen.getByText('icon:storefront')).toBeTruthy();
+  expect(screen.getByText('icon:home-outline')).toBeTruthy();   // the others are outlines
 });
 
-test('Music wears the disc-and-note picture, and is lit on the Music screen', () => {
+test('Music is a notes icon, filled and lit on the Music screen', () => {
   mockRoute = 'Music';
   const screen = render(<Header />);
   expect(screen.getByTestId('nav-music').props.accessibilityState).toEqual({ selected: true });
-  expect(screen.queryByText(/icon:musical-notes/)).toBeNull();   // a picture, not a glyph
+  expect(screen.getByText('icon:musical-notes')).toBeTruthy();
 });
 
-test('Bible wears the Holy Bible picture, and is lit in the reader', () => {
+test('Bible is a book icon, filled and lit in the reader; Hymns a hymnal, not a crossed-out piano', () => {
   mockRoute = 'bible';
   const screen = render(<Header />);
   expect(screen.getByTestId('nav-bible').props.accessibilityState).toEqual({ selected: true });
-  expect(screen.queryByText(/icon:book/)).toBeNull();   // a picture, not a glyph
+  expect(screen.getByText('icon:book')).toBeTruthy();
+  expect(screen.getByText('icon:book-music-outline')).toBeTruthy();
+  expect(screen.queryByText('icon:piano-off')).toBeNull();
 });
 
 test('wallpapers off: the header drops its picture for the plain navy', () => {

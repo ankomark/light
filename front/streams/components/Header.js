@@ -18,23 +18,12 @@ const HEADER_BG = colors.surface; // deep blue (#102E50) — fallback behind the
 // Wallpaper behind the header — re-hosted on our Cloudinary CDN, optimized.
 const HEADER_IMAGE = 'https://pub-9c5a2f0a7a2244be84e39a116c2dc4d5.r2.dev/wallpapers/bpqz33r3njhwouungnli.jpg';
 const INACTIVE = 'rgba(255,255,255,0.62)';
+// Tab icons: plain white line icons; the open screen's is filled, in the accent.
+const ICON = '#FFFFFF';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
-// The marketplace's own coloured artwork (it was the menu's Marketplace row).
-const MARKET_ART = require('../assets/marketplace-icon.png');
-// The house, in a bright maroon on clear (the deep original vanished on the navy header).
-const HOME_ART = require('../assets/home-icon.png');
-// A record with a blue note, brightened so the disc stands off the navy header.
-const MUSIC_ART = require('../assets/music-icon.png');
-// The Holy Bible, its black cover lifted to charcoal and its gold warmed so it
-// stands off the navy header.
-const BIBLE_ART = require('../assets/bible-icon.png');
 // "ADVENTIST LIFE" in 3D flame-gold with its light ring, cut out of its black
 // background (letters, bevels and ring only - no haze, so no box behind it).
 const TITLE_ART = require('../assets/title-cinematic.png');
-// Trying it out: the coloured tab pictures (Home, Music, Market, Bible) drawn
-// in one colour - grey like Alerts and Hymns, the accent when on that screen.
-// false brings their own colours back.
-const GREY_TABS = true;
 const TITLE_RATIO = 900 / 175;
 // How round the header's lower corners are.
 const CURVE = 12;
@@ -72,7 +61,7 @@ const NavItem = ({ set: Set = Ionicons, active, inactive, art, artStyle, tint, l
         resizeMode="contain"
       />
     ) : (
-      <Set name={isActive ? active : inactive} size={22} color={isActive ? colors.accent : INACTIVE} />
+      <Set name={isActive ? active : inactive} size={22} color={isActive ? colors.accent : ICON} />
     )}
     <Text style={[styles.navLabel, isActive && styles.navLabelActive]} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.tight}>
       {label}
@@ -182,33 +171,33 @@ const Header = ({ transparentBg = false }) => {
         {/* Bottom row: primary destinations */}
         <View style={[styles.bottomRow, { maxWidth: rowMaxWidth, alignSelf: 'center', width: '100%' }]}>
           <NavItem
-            art={HOME_ART} tint={GREY_TABS} artStyle={styles.homeArt} label="Home" testID="nav-home-outline"
+            active="home" inactive="home-outline" label="Home" testID="nav-home-outline"
             isActive={isOn('Home')} onPress={() => navigation.navigate('Home')}
           />
           <NavItem
-            art={MUSIC_ART} tint={GREY_TABS} artStyle={styles.homeArt} label="Music" testID="nav-music"
+            active="musical-notes" inactive="musical-notes-outline" label="Music" testID="nav-music"
             isActive={isOn('Music')} onPress={() => navigation.navigate('Music')}
           />
           {/* The marketplace, one tap from anywhere. (Explore lives on the
               home feed now, beside For You.) */}
           {marketOn && (
             <NavItem
-              art={MARKET_ART} tint={GREY_TABS} label={t('header.market')} testID="nav-market"
+              active="storefront" inactive="storefront-outline" label={t('header.market')} testID="nav-market"
               isActive={isOn('MarketplaceHome')} onPress={() => navigation.navigate('MarketplaceHome')}
             />
           )}
           <NavItem
-            art={BIBLE_ART} tint={GREY_TABS} artStyle={styles.homeArt} label="Bible" testID="nav-bible"
+            active="book" inactive="book-outline" label="Bible" testID="nav-bible"
             isActive={isOn('bible')} onPress={() => navigation.navigate('bible')}
           />
 
           <View style={styles.navItem}>
-            <NotificationsBell navigation={navigation} />
+            <NotificationsBell navigation={navigation} size={22} color={ICON} />
             <Text style={styles.navLabel} numberOfLines={1} maxFontSizeMultiplier={FONT_SCALE.tight}>{t('header.alerts')}</Text>
           </View>
 
           <NavItem
-            set={MaterialCommunityIcons} active="piano" inactive="piano-off" label="Hymns"
+            set={MaterialCommunityIcons} active="book-music" inactive="book-music-outline" label="Hymns"
             isActive={isOn('Hymns')} onPress={() => navigation.navigate('Hymns')}
           />
 
@@ -347,7 +336,6 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   navArt: { width: 22, height: 22 },
-  homeArt: { width: 24.2, height: 24.2 },   // the house, 10% larger
   // On the marketplace: a touch larger, as the glyphs fill in when active.
   navArtActive: { transform: [{ scale: 1.12 }] },
   navLabel: {
