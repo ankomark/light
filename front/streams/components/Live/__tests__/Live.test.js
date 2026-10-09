@@ -88,7 +88,8 @@ jest.mock('livekit-client', () => ({
   setLogLevel: () => {},
 }));
 jest.mock('../../../utils/orientation', () => ({ lockPortrait: jest.fn(), allowAllOrientations: jest.fn() }));
-jest.mock('../../../hooks/useKeyboardHeight', () => ({ __esModule: true, default: () => 0 }));
+let mockKb = 0;
+jest.mock('../../../hooks/useKeyboardHeight', () => ({ __esModule: true, default: () => mockKb }));
 jest.mock('../../ReportModal', () => () => null);
 jest.mock('../GraphicComposer', () => () => null);
 const mockFloated = [];
@@ -467,6 +468,30 @@ describe('Live room on its side (landscape)', () => {
     expect(screen.queryByTestId('live-heart')).toBeNull();
     fireEvent.press(screen.getByTestId('live-landscape-toggle'));
     expect(screen.getByPlaceholderText('live.chatPlaceholder')).toBeTruthy();
+  });
+
+  test('the chat sits on navy glass, like the portrait dock', () => {
+    const screen = open();
+    expect(screen.getByTestId('live-landscape-panel')).toBeTruthy();
+  });
+
+  test('typing: the keyboard does not bury the chat - the top bar and buttons step aside', () => {
+    mockKb = 180;
+    try {
+      const screen = open();
+      expect(screen.getByPlaceholderText('live.chatPlaceholder')).toBeTruthy();   // the text box stays
+      expect(screen.queryByTestId('live-heart')).toBeNull();                     // buttons step aside
+      expect(screen.queryByTestId('live-people')).toBeNull();                    // so does the top bar
+    } finally { mockKb = 0; }
+  });
+
+  test('typing with almost no room: just the text box, no message list squeezed to nothing', () => {
+    mockKb = 330;
+    try {
+      const screen = open();
+      expect(screen.getByPlaceholderText('live.chatPlaceholder')).toBeTruthy();
+      expect(screen.UNSAFE_queryAllByType(require('react-native').FlatList)).toHaveLength(0);
+    } finally { mockKb = 0; }
   });
 
   test('hearts still float up in the clean view', () => {

@@ -48,6 +48,9 @@ const PinnedRow = ({ pinned, label, onUnpin }) => (
 
 const LiveChat = ({
   messages, draft, onChangeDraft, onSend, style, pinned, onUnpin, onPressMessage, muted,
+  // How tall the message list may grow (landscape passes the room it has; 0
+  // = composer only, when the keyboard leaves no room for messages).
+  listMaxHeight = 200,
 }) => {
   const { t } = useI18n();
   const listRef = useRef(null);
@@ -68,17 +71,17 @@ const LiveChat = ({
   return (
     <View style={[styles.wrap, style]}>
       {!!pinned?.text && <PinnedRow pinned={pinned} label={t('live.pinnedLabel')} onUnpin={onUnpin} />}
-      <FlatList
+      {listMaxHeight > 0 && <FlatList
         ref={listRef}
         data={messages}
         keyExtractor={(m) => String(m.id)}
         renderItem={({ item }) => <ChatRow item={item} hostLabel={t('live.hostBadge')} onPress={onPressMessage} />}
         showsVerticalScrollIndicator={false}
-        style={styles.list}
+        style={[styles.list, { maxHeight: listMaxHeight }]}
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-      />
+      />}
       {muted ? (
         // Muted by the host: said plainly, instead of messages that vanish.
         <View style={[styles.composer, styles.mutedBox]} testID="chat-muted">

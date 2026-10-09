@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView,
-  useWindowDimensions, AppState, Share, Pressable, StatusBar,
+  useWindowDimensions, AppState, Share, Pressable, StatusBar, Keyboard,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1188,13 +1188,24 @@ const RoomInner = ({
   if (landscape) {
     const sideL = insets.left + spacing.sm;
     const sideR = insets.right + spacing.sm;
+    // Typing: on its side the keyboard takes most of the screen, so the top bar
+    // and the buttons step aside and the chat sits right on the keyboard with as
+    // many messages as fit (none, if only the text box does).
+    const typing = kbHeight > 0;
+    const panelBottom = typing ? kbHeight + spacing.xs : insets.bottom + spacing.sm;
+    const panelTop = typing ? insets.top + spacing.sm : insets.top + 64;
+    const panelMax = Math.max(0, winH - panelTop - panelBottom);
+    // The panel's own padding, the text box, and (when not typing) the buttons.
+    const chatListMax = Math.max(0, panelMax - 2 * spacing.sm - 56 - (typing ? 0 : 60));
+    const listMax = chatListMax < 48 ? 0 : Math.min(200, chatListMax);
     return (
       <View style={styles.portraitRoot}>
         <StatusBar hidden />
         <View style={styles.bgStage}>{stageNode}</View>
         <Pressable
           style={StyleSheet.absoluteFill}
-          onPress={() => setChromeHidden((h) => !h)}
+          // Typing: a tap on the picture puts the keyboard away first.
+          onPress={() => (typing ? Keyboard.dismiss() : setChromeHidden((h) => !h))}
           accessibilityRole="button"
           accessibilityLabel={t(chromeHidden ? 'live.showControls' : 'live.hideControls')}
           testID="live-landscape-toggle"
@@ -1208,19 +1219,24 @@ const RoomInner = ({
           onReposition={(pos) => publishGraphic({ ...graphicRef.current, ...pos })}
         />
         {/* Hearts keep floating up even in the clean view. */}
-        <View style={[styles.landscapePanel, { top: insets.top + 64, bottom: insets.bottom + spacing.sm + kbHeight, right: sideR }]}
-          pointerEvents="box-none">
-          {!chromeHidden && inboxNode}
-          <View style={[styles.bottomRow, styles.bottomRowLandscape]} pointerEvents="box-none">
-            {!chromeHidden && (
-              <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat} style={styles.chat}
-                {...chatExtras} />
-            )}
-            <FloatingReactions ref={reactionsRef} />
+        <FloatingReactions ref={reactionsRef} />
+        {/* Chat, requests and buttons on the portrait dock's frosted navy glass,
+            bottom-right, only as tall as what it holds. */}
+        {!chromeHidden && (
+          <View style={[styles.landscapePanel, { bottom: panelBottom, right: sideR, maxHeight: panelMax }]}
+            testID="live-landscape-panel">
+            <BlurView intensity={32} tint="dark" style={styles.landscapeGlass}>
+              <View style={styles.dockTint} pointerEvents="none" />
+              <View style={styles.landscapeGlassInner}>
+                {!typing && inboxNode}
+                <LiveChat messages={messages} draft={draft} onChangeDraft={setDraft} onSend={sendChat}
+                  style={styles.chatFull} listMaxHeight={listMax} {...chatExtras} />
+                {!typing && controlsNode}
+              </View>
+            </BlurView>
           </View>
-          {!chromeHidden && controlsNode}
-        </View>
-        {chromeHidden ? (
+        )}
+        {chromeHidden || typing ? (
           <View style={[styles.liveCorner, { top: insets.top + spacing.sm, left: sideL }]} pointerEvents="none">
             <LiveBadge />
           </View>
@@ -1404,8 +1420,9 @@ const styles = StyleSheet.create({
   floatThumbsLeft: { right: undefined, left: spacing.md, top: 72 },
   // Landscape: chat, requests and controls float on the right, over the video.
   landscapePanel: { position: 'absolute', width: '38%', maxWidth: 320, zIndex: 3 },
+  landscapeGlass: { borderRadius: radius.xl, overflow: 'hidden', borderWidth: 1, borderColor: live.hair },
+  landscapeGlassInner: { padding: spacing.sm },
   liveCorner: { position: 'absolute', zIndex: 3 },
-  bottomRowLandscape: { flex: 1 },
   controlsLandscape: { flexWrap: 'wrap', justifyContent: 'center' },
 
   guard: { flex: 1, backgroundColor: live.bg, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
@@ -1517,7 +1534,6 @@ const styles = StyleSheet.create({
   reqRejectText: { ...typography.caption, color: live.inkDim, fontWeight: '700' },
 
   bottomRow: { minHeight: 80, justifyContent: 'flex-end' },
-  chat: { },
 
   controls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   ctrlBtn: {
