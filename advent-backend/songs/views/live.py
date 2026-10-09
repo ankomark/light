@@ -13,9 +13,9 @@ from .. import livekit_service as lk
 # How many co-hosts can share the stage with the host at once.
 MAX_COHOSTS = 4
 
-# Follower thresholds to go live (staff/admins are exempt). Video (Go-Live) is a
-# heavier commitment than an audio Meet, so it needs a larger following.
-MIN_FOLLOWERS = {'tv': 1000, 'meet': 100}
+# Follower thresholds to go live (staff/admins are exempt). Video (Go-Live)
+# needs a following of 1,000; an audio Meet is open to everyone.
+MIN_FOLLOWERS = {'tv': 1000, 'meet': 0}
 KIND_LABEL = {'tv': 'Go-Live', 'meet': 'Meet'}
 
 # A broadcast still "live" this long after it started lost its host without
@@ -201,7 +201,7 @@ class LiveBroadcastViewSet(viewsets.GenericViewSet):
             if refused:
                 return refused
         # Follower gate (staff/admins exempt): Go-Live (video) needs 1,000
-        # followers; Meet (audio) needs 100.
+        # followers; Meet (audio) needs none.
         if not request.user.is_platform_admin and not singles_only:
             needed = MIN_FOLLOWERS.get(kind, 0)
             if needed and request.user.followers.count() < needed:

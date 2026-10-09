@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import jwt as pyjwt
+from django.core.cache import cache
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -246,6 +247,27 @@ class FollowerGateTests(APITestCase):
         self.user.admin_role = 'super_admin'
         self.user.save(update_fields=['admin_role'])
         self.assertEqual(self._go('tv').status_code, 201)  # zero followers, still allowed
+
+
+@override_settings(LIVEKIT_API_KEY='devkey', LIVEKIT_API_SECRET=SECRET, LIVEKIT_URL='')
+class ShippedFollowerGateTests(APITestCase):
+    """The real thresholds: anyone may start a Meet; video needs 1,000."""
+
+    def setUp(self):
+        cache.clear()  # the go_live throttle counts across tests
+        self.user = User.objects.create_user('newcomer', 'n@x.com', 'x')
+        self.client.force_authenticate(self.user)
+
+    def _go(self, kind):
+        with mock.patch('songs.views.live.notify_user'):
+            return self.client.post('/api/live/broadcasts/', {'kind': kind, 'title': 'Hi'}, format='json')
+
+    def test_meet_needs_no_followers(self):
+        self.assertEqual(self._go('meet').status_code, 201)
+
+    def test_video_still_needs_1000(self):
+        r = self._go('tv')
+        self.assertEqual((r.status_code, r.data['code'], r.data['needed']), (403, 'followers_needed', 1000))
 
 
 @override_settings(LIVEKIT_API_KEY='devkey', LIVEKIT_API_SECRET=SECRET, LIVEKIT_URL='')

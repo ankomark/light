@@ -110,9 +110,9 @@ class LiveScanTests(APITestCase):
         self._as(self.viewer)
         r = self.client.get('/api/live/broadcasts/eligibility/')
         self.assertEqual(r.data['followers'], 0)
-        self.assertEqual(r.data['allowed'], {'tv': False, 'meet': False})
-        r = self.client.post('/api/live/broadcasts/', {'kind': 'meet', 'title': 'Hi'}, format='json')
-        self.assertEqual((r.status_code, r.data['code'], r.data['needed']), (403, 'followers_needed', 100))
+        self.assertEqual(r.data['allowed'], {'tv': False, 'meet': True})
+        r = self.client.post('/api/live/broadcasts/', {'kind': 'tv', 'title': 'Hi'}, format='json')
+        self.assertEqual((r.status_code, r.data['code'], r.data['needed']), (403, 'followers_needed', 1000))
 
     def test_an_admin_takedown_closes_the_room_at_livekit(self):
         from songs.views.admin import _end_live
@@ -161,6 +161,9 @@ class LiveServerDownTests(APITestCase):
 class LiveNotDeployedYetTests(APITestCase):
     """The app server goes live before the live server: Go Live and joining
     say 'unavailable' instead of making broadcasts no phone can reach."""
+
+    def setUp(self):
+        cache.clear()  # the go_live throttle counts across tests
 
     @override_settings(LIVEKIT_URL='', LIVE_ALLOW_UNCONFIGURED=False)
     def test_no_live_server_no_broadcasts(self):
