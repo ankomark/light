@@ -31,6 +31,10 @@ const BIBLE_ART = require('../assets/bible-icon.png');
 // "ADVENTIST LIFE" in 3D flame-gold with its light ring, cut out of its black
 // background (letters, bevels and ring only - no haze, so no box behind it).
 const TITLE_ART = require('../assets/title-cinematic.png');
+// Trying it out: the coloured tab pictures (Home, Music, Market, Bible) drawn
+// in one colour - grey like Alerts and Hymns, the accent when on that screen.
+// false brings their own colours back.
+const GREY_TABS = true;
 const TITLE_RATIO = 900 / 175;
 // How round the header's lower corners are.
 const CURVE = 12;
@@ -178,23 +182,23 @@ const Header = ({ transparentBg = false }) => {
         {/* Bottom row: primary destinations */}
         <View style={[styles.bottomRow, { maxWidth: rowMaxWidth, alignSelf: 'center', width: '100%' }]}>
           <NavItem
-            art={HOME_ART} artStyle={styles.homeArt} label="Home" testID="nav-home-outline"
+            art={HOME_ART} tint={GREY_TABS} artStyle={styles.homeArt} label="Home" testID="nav-home-outline"
             isActive={isOn('Home')} onPress={() => navigation.navigate('Home')}
           />
           <NavItem
-            art={MUSIC_ART} artStyle={styles.homeArt} label="Music" testID="nav-music"
+            art={MUSIC_ART} tint={GREY_TABS} artStyle={styles.homeArt} label="Music" testID="nav-music"
             isActive={isOn('Music')} onPress={() => navigation.navigate('Music')}
           />
           {/* The marketplace, one tap from anywhere. (Explore lives on the
               home feed now, beside For You.) */}
           {marketOn && (
             <NavItem
-              art={MARKET_ART} label={t('header.market')} testID="nav-market"
+              art={MARKET_ART} tint={GREY_TABS} label={t('header.market')} testID="nav-market"
               isActive={isOn('MarketplaceHome')} onPress={() => navigation.navigate('MarketplaceHome')}
             />
           )}
           <NavItem
-            art={BIBLE_ART} artStyle={styles.homeArt} label="Bible" testID="nav-bible"
+            art={BIBLE_ART} tint={GREY_TABS} artStyle={styles.homeArt} label="Bible" testID="nav-bible"
             isActive={isOn('bible')} onPress={() => navigation.navigate('bible')}
           />
 
