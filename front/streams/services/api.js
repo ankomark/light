@@ -2746,3 +2746,10 @@ export const adminPromotionAction = (id, action, note = '') =>
   apiRequest('post', `/admin/promotions/${id}/${action}/`, { note });
 export const fetchAdminPromotionPackages = () => apiRequest('get', '/admin/promotion-packages/');
 export const updateAdminPromotionPackage = (key, data) => apiRequest('patch', `/admin/promotion-packages/${key}/`, data);
+export const fetchPromotable = (kind) => apiRequest('get', `/promotions/promotable/?kind=${kind}`);
+export const createAdminPromotionPackage = (data) => apiRequest('post', '/admin/promotion-packages/', data);
+export const deleteAdminPromotionPackage = (key) => apiRequest('delete', `/admin/promotion-packages/${key}/`);
+export const fetchPromotionTill = () => apiRequest('get', '/admin/promotion-till/');
+export const savePromotionTill = (till) => apiRequest('put', '/admin/promotion-till/', { till });
+export const testPromotionTill = (till, phone) => apiRequest('post', '/admin/promotion-till/test/', { till, phone });
+export const fetchPromotionTillTest = (till) => apiRequest('get', `/admin/promotion-till/test/?till=${encodeURIComponent(till)}`);

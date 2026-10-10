@@ -6,6 +6,10 @@
 //
 // Nothing shows until the verse is here, and nothing at all if it can't be
 // fetched: the feed never waits on it or shows an error for it.
+//
+// Once someone has scrolled past it, it has been seen: it stays for the rest
+// of that visit (nothing jumps under their thumb), and the next launch that
+// day starts without it. The next day it is back, until they pass it again.
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +19,7 @@ import VerseShareSheet, { VerseCard } from './VerseShareSheet';
 import { useI18n } from '../context/I18nContext';
 import { colors, spacing, radius } from '../constants/theme';
 import { todayIso } from '../utils/quizCache';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // One fetch per day per app run: the header re-renders with every feed
 // update, and a remount (tab switch) shouldn't refetch either.
@@ -24,15 +29,39 @@ const today = () => todayIso();
 
 export const _resetFeedVerse = () => { kept = null; };   // tests
 
-const FeedVerseCard = ({ width, refreshSignal }) => {
+const passedKey = (userId) => `feedVerse:passed:${userId || 'guest'}`;
+
+/** They scrolled past today's verse: not shown again until tomorrow. */
+export const markVersePassed = (userId) => {
+  AsyncStorage.setItem(passedKey(userId), today()).catch(() => {});
+};
+
+/** Already seen today (decided once, at launch)? */
+export const versePassedToday = async (userId) => {
+  try {
+    return (await AsyncStorage.getItem(passedKey(userId))) === today();
+  } catch {
+    return false;
+  }
+};
+
+const FeedVerseCard = ({ width, refreshSignal, userId, onBottom }) => {
   const { t } = useI18n();
   const navigation = useNavigation();
   const [verse, setVerse] = useState(() => (kept && kept.day === today() ? kept.verse : null));
   const [sharing, setSharing] = useState(false);
+  // null = not known yet (nothing drawn, so it never flashes up and away).
+  const [seenToday, setSeenToday] = useState(null);
+  useEffect(() => {
+    let live = true;
+    versePassedToday(userId).then((v) => { if (live) setSeenToday(v); });
+    return () => { live = false; };
+  }, [userId]);
 
   // Fetched when missing, when the day has turned (midnight Nairobi), and on
   // the feed's pull-to-refresh — so an offline start isn't verse-less all day.
   useEffect(() => {
+    if (seenToday !== false) return undefined;          // not wanted (or not known yet)
     if (verse && kept?.day === today()) return undefined;
     let live = true;
     fetchDailyVerse(null, { via: 'feed' })
@@ -43,14 +72,16 @@ const FeedVerseCard = ({ width, refreshSignal }) => {
       })
       .catch(() => {});
     return () => { live = false; };
-  }, [verse, refreshSignal]);
+  }, [verse, refreshSignal, seenToday]);
 
   const read = useCallback(() => navigation.navigate('DailyVerse'), [navigation]);
 
-  if (!verse) return null;
+  if (!verse || seenToday !== false) return null;
   const cardW = Math.min(width - spacing.md * 2, 480);
   return (
-    <View style={styles.wrap} testID="feed-verse">
+    <View style={styles.wrap} testID="feed-verse"
+          // Where it ends in the feed: scrolled beyond this, it has been seen.
+          onLayout={(e) => onBottom?.(e.nativeEvent.layout.y + e.nativeEvent.layout.height)}>
       <TouchableOpacity activeOpacity={0.9} onPress={read} accessibilityRole="button"
                         accessibilityLabel={`${t('verse.title')}: ${verse.text} — ${verse.reference}`}>
         <VerseCard verse={verse} width={cardW} title={t('verse.title')} />

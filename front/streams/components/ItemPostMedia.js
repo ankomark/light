@@ -4,11 +4,11 @@
 // opens it; double-tap likes, like any post.
 import React, { useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import ResilientImage from './ResilientImage';
 
 const DOUBLE_TAP_MS = 280;
 
@@ -63,7 +63,7 @@ const ItemPostMedia = ({ item, width, onDoubleTapLike, onOpen }) => {
       testID={`${item.content_type}-post-${item.id}`} style={[styles.card, { width }]}>
       <View style={[styles.picture, { height: Math.round(width * 0.9) }]}>
         {picture ? (
-          <Image source={{ uri: picture }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
+          <ResilientImage uri={picture} style={StyleSheet.absoluteFill} />
         ) : (
           <View style={[StyleSheet.absoluteFill, styles.fallback]}>
             <Ionicons name={isProduct ? 'pricetag-outline' : 'briefcase-outline'} size={44} color={colors.textMuted} />

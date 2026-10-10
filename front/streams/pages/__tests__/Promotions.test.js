@@ -13,6 +13,9 @@ const mockApi = {
   fetchMyPromotions: jest.fn(), cancelPromotion: jest.fn(),
   fetchAdminPromotions: jest.fn(), adminPromotionAction: jest.fn(),
   fetchAdminPromotionPackages: jest.fn(), updateAdminPromotionPackage: jest.fn(),
+  fetchPromotable: jest.fn(), createAdminPromotionPackage: jest.fn(), deleteAdminPromotionPackage: jest.fn(),
+  fetchPromotionTill: jest.fn(), savePromotionTill: jest.fn(), testPromotionTill: jest.fn(),
+  fetchPromotionTillTest: jest.fn(),
 };
 jest.mock('../../services/api', () => new Proxy({}, { get: (_, k) => (...a) => mockApi[k](...a) }));
 jest.mock('../../context/I18nContext', () => ({
@@ -155,5 +158,71 @@ describe('in the feed', () => {
   test('none, or too few posts: as it was', () => {
     expect(withSponsored(posts, [])).toBe(posts);
     expect(withSponsored(posts.slice(0, 2), [{ promotion_id: 1, kind: 'profile', profile: {} }])).toHaveLength(2);
+  });
+});
+
+
+test('opened with nothing chosen: first choose what, then the plan', async () => {
+  mockApi.fetchPromotionPackages.mockResolvedValue(CATALOG);
+  mockApi.fetchPromotable.mockImplementation(async (kind) => (kind === 'post'
+    ? [{ id: 41, title: 'Choir night', picture: '', busy: false }, { id: 42, title: 'Old', picture: '', busy: true }]
+    : [{ id: 7, title: 'Study Bible', picture: '', detail: 'KES 1,500', busy: false }]));
+  mockApi.createPromotion.mockResolvedValue(promotion({ kind: 'product' }));
+  mockApi.payPromotion.mockResolvedValue(promotion({ kind: 'product', status: 'paying' }));
+  const screen = render(<Promote navigation={nav()} route={{ params: {} }} />);
+  await waitFor(() => expect(screen.getByTestId('promote-pick-post-41')).toBeTruthy());
+  expect(screen.getByTestId('promote-pick-post-42').props.accessibilityState?.disabled).toBe(true);   // already promoted
+  fireEvent.press(screen.getByTestId('promote-kind-product'));
+  await waitFor(() => expect(screen.getByTestId('promote-pick-product-7')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('promote-pick-product-7'));
+  expect(screen.getByTestId('promote-chosen')).toBeTruthy();
+  expect(screen.getByText('Study Bible')).toBeTruthy();
+  fireEvent.changeText(screen.getByTestId('promote-phone'), '0712345678');
+  await act(async () => { fireEvent.press(screen.getByTestId('promote-pay')); });
+  expect(mockApi.createPromotion).toHaveBeenCalledWith(expect.objectContaining({ kind: 'product', target_id: 7 }));
+});
+
+describe('admins', () => {
+  const { default: AdminPromotions } = require('../../components/admin/AdminPromotions');
+
+  test('a new till is saved only after its KES 1 test is paid', async () => {
+    mockApi.fetchAdminPromotions.mockResolvedValue([]);
+    mockApi.fetchPromotionTill.mockResolvedValue({ till: '5551234', source: 'settings' });
+    mockApi.testPromotionTill.mockResolvedValue({ status: 'pending', till: '8821774' });
+    mockApi.fetchPromotionTillTest.mockResolvedValue({ status: 'paid', till: '8821774' });
+    mockApi.savePromotionTill.mockResolvedValue({ till: '8821774', source: 'saved', set_by: 'streams:1 boss' });
+    const screen = render(<AdminPromotions />);
+    fireEvent.press(screen.getByTestId('admin-promotions-tab-till'));
+    await waitFor(() => expect(screen.getByText('5551234')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('admin-till-number'), '8821774');
+    fireEvent.changeText(screen.getByTestId('admin-till-phone'), '0712345678');
+    expect(screen.getByTestId('admin-till-save').props.accessibilityState?.disabled).toBe(true);
+    jest.useFakeTimers();
+    await act(async () => { fireEvent.press(screen.getByTestId('admin-till-send-test')); });
+    expect(mockApi.testPromotionTill).toHaveBeenCalledWith('8821774', '0712345678');
+    await act(async () => { jest.advanceTimersByTime(3100); });
+    jest.useRealTimers();
+    await waitFor(() => expect(screen.getByText('adminPromo.tillTestPassed')).toBeTruthy());
+    await act(async () => { fireEvent.press(screen.getByTestId('admin-till-save')); });
+    expect(mockApi.savePromotionTill).toHaveBeenCalledWith('8821774');
+    await waitFor(() => expect(screen.getByText('8821774')).toBeTruthy());
+  });
+
+  test('plans: add one', async () => {
+    mockApi.fetchAdminPromotions.mockResolvedValue([]);
+    mockApi.fetchAdminPromotionPackages.mockResolvedValue([
+      { key: 'starter', name: 'Starter', description: '', price: 200, views: 1000, days: 3, is_active: true }]);
+    mockApi.createAdminPromotionPackage.mockResolvedValue({});
+    const screen = render(<AdminPromotions />);
+    fireEvent.press(screen.getByTestId('admin-promotions-tab-plans'));
+    await waitFor(() => expect(screen.getByTestId('admin-package-starter')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('admin-package-add'));
+    fireEvent.changeText(screen.getByTestId('admin-package-new-name'), 'Mega');
+    fireEvent.changeText(screen.getByTestId('admin-package-new-price'), '2,000');
+    fireEvent.changeText(screen.getByTestId('admin-package-new-views'), '15000');
+    fireEvent.changeText(screen.getByTestId('admin-package-new-days'), '7');
+    await act(async () => { fireEvent.press(screen.getByTestId('admin-package-new-save')); });
+    expect(mockApi.createAdminPromotionPackage).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Mega', price: 2000, views: 15000, days: 7 }));
   });
 });

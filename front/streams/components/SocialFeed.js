@@ -40,7 +40,7 @@ import PendingPosts from './PendingPosts';
 import { DownloadButton, SaveButton, LikeButton, ShareButton } from './SocialActions';
 import { PostSkeleton } from './SkeletonLoader';
 import StoriesBar from './StoriesBar';
-import FeedVerseCard from './FeedVerseCard';
+import FeedVerseCard, { markVersePassed } from './FeedVerseCard';
 import AudioVisualizer from './AudioVisualizer';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
@@ -50,6 +50,7 @@ import { on, EVENTS } from '../utils/appEvents';
 import { useContentWidth, useMaxMediaHeight, FONT_SCALE } from '../utils/layout';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import useOnline from '../hooks/useOnline';
+import ResilientImage, { PLACEHOLDER_BG } from './ResilientImage';
 import OfflineBanner from './OfflineBanner';
 import ImageViewer from './ImageViewer';
 import { colors, radius, typography, shadows } from '../constants/theme';
@@ -137,6 +138,10 @@ const FEED_MAX_AGE_MS = 30 * 60 * 1000;
 // When the feed can't be fetched at all: any kept copy beats an empty page.
 const KEPT_FEED_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
+// How long a focused video may go without its first frame before the player
+// is made again (a stalled stream).
+const VIDEO_STALL_MS = 15000;
+
 const processPost = (post, existingFollowStates = {}) => {
   if (!post.user || typeof post.user !== 'object') {
     post.user = {
@@ -184,6 +189,9 @@ const processPost = (post, existingFollowStates = {}) => {
   // video is the .mp4, which can't render in <Image>, so it's not a valid poster.
   const isVideo = post.content_type === 'video';
   const posterUrl = isVideo ? (post.thumbnail_url || null) : primaryUrl;
+  // A photo's small still (the server's 640px copy), painted first while the
+  // full picture comes: never a dark box on a slow connection.
+  const previewUrl = !isVideo && post.thumbnail_url && post.thumbnail_url !== primaryUrl ? post.thumbnail_url : null;
 
   return {
     ...post,
@@ -198,6 +206,7 @@ const processPost = (post, existingFollowStates = {}) => {
     height: primaryH,
     mediaUrl: primaryUrl,
     thumbnailUrl: posterUrl,
+    previewUrl,
     mediaItems: itemUrls.length ? itemUrls : (primaryUrl ? [primaryUrl] : []),
     fullMediaItems: fullUrls.length ? fullUrls : [post.media_url || primaryUrl].filter(Boolean),
   };
@@ -224,12 +233,9 @@ const FeedCarousel = React.memo(function FeedCarousel({ urls, aspectRatio, onPre
         renderItem={({ item: url }) => (
           <Pressable onPress={() => onPressSlide?.(urls.indexOf(url))} disabled={!onPressSlide}
                      style={{ width: cardW, height: '100%' }} testID="feed-photo">
-            <Image
-              source={{ uri: url }}
+            <ResilientImage
+              uri={url}
               style={{ width: '100%', height: '100%' }}
-              contentFit="cover"
-              transition={150}
-              cachePolicy="memory-disk"
               recyclingKey={url}
             />
           </Pressable>
@@ -378,6 +384,19 @@ const PostMedia = React.memo(function PostMedia({
     setIsLoading(false);
   }, []);
 
+  // A focused video with no first frame after a while (a stalled stream): the
+  // player is made again (twice at most), then the card says "unavailable —
+  // Retry" — never a spinner over a dark box for ever.
+  const [videoKey, setVideoKey] = useState(0);
+  useEffect(() => {
+    if (item.content_type !== 'video' || !isFocused || videoReady || hasError || online === false) return undefined;
+    const id = setTimeout(() => {
+      if (videoKey < 2) setVideoKey((k) => k + 1);
+      else { setHasError(true); setIsLoading(false); }
+    }, VIDEO_STALL_MS);
+    return () => clearTimeout(id);
+  }, [item.content_type, isFocused, videoReady, hasError, online, videoKey]);
+
   // Double-tap-to-like: heart burst + haptic + like (never unlikes — a
   // double-tap only ever adds a like, Instagram-style).
   const heartScale = useRef(new Animated.Value(0)).current;
@@ -451,6 +470,7 @@ const PostMedia = React.memo(function PostMedia({
             setCurrentUrl(item.mediaUrl);
             setIsLoading(true);
             setHasError(false);
+            setVideoKey(0);
           }}
         >
           <Text style={styles.retryButtonText}>{t('feed.retry')}</Text>
@@ -468,13 +488,11 @@ const PostMedia = React.memo(function PostMedia({
       return (
         <View style={[styles.mediaContainer, { aspectRatio }]}>
           {item.thumbnailUrl ? (
-            <Image
-              source={{ uri: item.thumbnailUrl }}
+            <ResilientImage
+              uri={item.thumbnailUrl}
               style={[styles.media, { aspectRatio }]}
-              contentFit="cover"
-              transition={150}
-              cachePolicy="memory-disk"
               recyclingKey={String(item.id)}
+              showMark={false}
             />
           ) : (
             <View style={[styles.media, styles.videoPosterFallback, { aspectRatio }]} />
@@ -502,6 +520,7 @@ const PostMedia = React.memo(function PostMedia({
     return (
       <View style={[styles.mediaContainer, { aspectRatio }]}>
         <AppVideo
+          key={`v${videoKey}`}
           source={{ uri: videoUri }}
           style={[styles.media, { aspectRatio }]}
           resizeMode="cover"
@@ -521,12 +540,11 @@ const PostMedia = React.memo(function PostMedia({
             style={[styles.videoPosterOverlay, { opacity: posterFade }]}
             pointerEvents="none"
           >
-            <Image
-              source={{ uri: item.thumbnailUrl }}
+            <ResilientImage
+              uri={item.thumbnailUrl}
               style={[styles.media, { aspectRatio }]}
-              contentFit="cover"
-              cachePolicy="memory-disk"
               recyclingKey={String(item.id)}
+              showMark={false}
             />
           </Animated.View>
         )}
@@ -600,19 +618,16 @@ const PostMedia = React.memo(function PostMedia({
           page landed, and expo-image fades in from its own cache — so hiding
           the image until onLoad fired was showing a spinner over a picture that
           was ready to draw. The reserved box means nothing below it shifts. */}
-      <Image
-        source={{ uri: currentUrl }}
+      {/* Tries again by itself on a failed or hung load (ResilientImage);
+          only when every try fails does handleError swap to the original
+          file or show "unavailable". FlatList recycles cells: recyclingKey
+          stops a reused cell drawing the previous post's photo. */}
+      <ResilientImage
+        uri={currentUrl}
+        previewUri={item.previewUrl}
         style={[styles.media, { aspectRatio }]}
-        contentFit="cover"
-        transition={150}
-        // Keep decoded bitmaps in memory as well as on disk: scrolling back up
-        // then re-paints instead of re-decoding from the file.
-        cachePolicy="memory-disk"
-        // FlatList recycles cells. Without this, a recycled cell keeps drawing
-        // the previous post's photo until the new one decodes — the flash of
-        // "wrong image" people read as jank.
         recyclingKey={String(item.id)}
-        onError={handleError}
+        onFailed={handleError}
         onLoad={handleLoad}
       />
 
@@ -689,6 +704,16 @@ const SocialFeed = ({ showBackground = true }) => {
   const [newPostsAvailable, setNewPostsAvailable] = useState(false);
   const [topBarH, setTopBarH] = useState(0);
   const [error, setError] = useState(null);
+  // The verse card's lower edge in the list: scrolled past it, it's been seen
+  // today (FeedVerseCard), and the next launch starts without it.
+  const verseBottomRef = useRef(null);
+  const onFeedScroll = useCallback((e) => {
+    const bottom = verseBottomRef.current;
+    if (bottom && e.nativeEvent.contentOffset.y > bottom) {
+      verseBottomRef.current = null;
+      markVersePassed(_cu?.id);
+    }
+  }, [_cu?.id]);
   // Promotions placed among the posts (withSponsored); reported seen once each.
   const [sponsored, setSponsored] = useState([]);
   const sponsoredSeenRef = useRef(new Set());
@@ -1679,6 +1704,8 @@ const SocialFeed = ({ showBackground = true }) => {
         keyboardShouldPersistTaps="handled"
         ref={flatListRef}
         data={listData}
+        onScroll={onFeedScroll}
+        scrollEventThrottle={250}
         renderItem={renderItem}
         ListHeaderComponent={
           <View>
@@ -1687,7 +1714,10 @@ const SocialFeed = ({ showBackground = true }) => {
             <View style={{ height: topBarH }} />
             <StoriesBar navigation={navigation} refreshSignal={storiesRefresh} />
             {/* The verse of the day, pinned above the posts (not in search). */}
-            {!searchQuery ? <FeedVerseCard width={cardW} refreshSignal={storiesRefresh} /> : null}
+            {!searchQuery ? (
+              <FeedVerseCard width={cardW} refreshSignal={storiesRefresh} userId={currentUser?.id}
+                             onBottom={(y) => { verseBottomRef.current = y; }} />
+            ) : null}
             {/* Offline, or a load failed, with posts still on screen: say so
                 quietly instead of a popup. (Nothing on screen: the empty
                 state below has its own Retry.) */}
@@ -1935,7 +1965,7 @@ const styles = StyleSheet.create({
 
   mediaContainer: {
     width: '100%',
-    backgroundColor: colors.black,
+    backgroundColor: PLACEHOLDER_BG,     // never a black box while loading
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1943,7 +1973,7 @@ const styles = StyleSheet.create({
   media: {
     width: '100%',
     aspectRatio: 1,
-    backgroundColor: colors.black,
+    backgroundColor: PLACEHOLDER_BG,
   },
   // Dark placeholder for an off-screen video with no poster frame yet.
   videoPosterFallback: {
@@ -1953,7 +1983,7 @@ const styles = StyleSheet.create({
   videoPosterOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 1,
-    backgroundColor: colors.black,
+    backgroundColor: PLACEHOLDER_BG,
   },
   // Double-tap-to-like heart burst, centered over the media.
   heartBurst: {

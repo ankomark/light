@@ -594,7 +594,7 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
               {/* Promote your profile: more people, more followers. */}
               <TouchableOpacity
                 style={styles.squareBtn}
-                onPress={() => navigation.navigate('Promote', { kind: 'profile', title: `@${user.username}` })}
+                onPress={() => navigation.navigate('Promote')}   // choose what to promote first
                 activeOpacity={0.85}
                 accessibilityLabel={t('promote.promoteProfile')}
                 testID="profile-promote"

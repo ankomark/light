@@ -7,6 +7,7 @@ from .views.admin_security_centre import AdminSecurityCentreViewSet
 from .views.promotions import (
     PromotionPackages, Promotions, PromotionDetail, PromotionPay, PromotionCancel, PromotionServe,
     PromotionSeen, PromotionTap, AdminPromotions, AdminPromotionAction, AdminPromotionPackages,
+    PromotionPromotable, AdminPromotionTill, AdminPromotionTillTest,
 )
 from .views.admin_tickets import (
     AdminTicketsStats, AdminTicketsAudit, AdminTicketEvents, AdminTicketEvent, AdminTicketEventAction,
@@ -335,6 +336,9 @@ urlpatterns = [
     path('promotions/', Promotions.as_view(), name='promotions'),
     path('promotions/packages/', PromotionPackages.as_view(), name='promotion-packages'),
     path('promotions/serve/', PromotionServe.as_view(), name='promotion-serve'),
+    path('promotions/promotable/', PromotionPromotable.as_view(), name='promotion-promotable'),
+    path('admin/promotion-till/', AdminPromotionTill.as_view(), name='admin-promotion-till'),
+    path('admin/promotion-till/test/', AdminPromotionTillTest.as_view(), name='admin-promotion-till-test'),
     path('promotions/<int:pk>/', PromotionDetail.as_view(), name='promotion'),
     path('promotions/<int:pk>/pay/', PromotionPay.as_view(), name='promotion-pay'),
     path('promotions/<int:pk>/cancel/', PromotionCancel.as_view(), name='promotion-cancel'),

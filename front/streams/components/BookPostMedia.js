@@ -10,6 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import { categoryLabel } from '../utils/publications';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import ResilientImage from './ResilientImage';
 
 const DOUBLE_TAP_MS = 280;
 
@@ -60,7 +61,7 @@ const BookPostMedia = ({ item, width, onDoubleTapLike, onOpen }) => {
       <View style={styles.inner}>
         <View style={[styles.cover, { width: coverW, height: Math.round(coverW * 1.5) }]}>
           {book.cover ? (
-            <Image source={{ uri: book.cover }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
+            <ResilientImage uri={book.cover} style={StyleSheet.absoluteFill} />
           ) : (
             <View style={[StyleSheet.absoluteFill, styles.fallback]}>
               <MaterialIcons name="menu-book" size={30} color={colors.textMuted} />

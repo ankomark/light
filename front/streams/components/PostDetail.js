@@ -30,6 +30,7 @@ import { colors, typography, spacing, radius, shadows } from '../constants/theme
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
 import { peekCache, readCache, writeCache, dropCache, userKey } from '../utils/screenCache';
+import ResilientImage, { PLACEHOLDER_BG } from './ResilientImage';
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 
 const getOptimizedUrl = (url, type = 'image') => {
@@ -335,18 +336,14 @@ const PostDetail = ({ route, navigation }) => {
             >
               {post.photos.map((url, i) => (
                 <Pressable key={`${i}_${url}`} onPress={() => setViewerAt(i)} style={{ width: mediaFrameW, height: '100%' }}>
-                  <Image source={{ uri: url }} style={styles.media} resizeMode="cover" onError={handleMediaError} />
+                  <ResilientImage uri={url} style={styles.media} onFailed={handleMediaError} />
                 </Pressable>
               ))}
             </ScrollView>
           ) : (
             <Pressable style={styles.media} onPress={() => setViewerAt(0)} testID="post-photo">
-              <Image
-                source={{ uri: post.mediaUrl }}
-                style={styles.media}
-                resizeMode="cover"
-                onError={handleMediaError}
-              />
+              <ResilientImage uri={post.mediaUrl} previewUri={post.thumbnail_url} style={styles.media}
+                              onFailed={handleMediaError} />
             </Pressable>
           )}
           {post.content_type === 'image' && post.photos.length > 1 && !mediaError ? (
@@ -525,7 +522,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     borderRadius: radius.lg,
     overflow: 'hidden',
-    backgroundColor: colors.black,
+    backgroundColor: PLACEHOLDER_BG,     // never a black box while loading
     alignSelf: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.12)',

@@ -4242,6 +4242,8 @@ class PromotionPackage(models.Model):
     is_active = models.BooleanField(default=True)
     order = models.PositiveSmallIntegerField(default=0)
 
+    description = models.CharField(max_length=160, blank=True, default='')
+
     class Meta:
         ordering = ['order', 'price']
 
@@ -4254,12 +4256,14 @@ class Promotion(models.Model):
 
     unpaid ──pay──▶ paying ──paid──▶ review ──approve──▶ active ──▶ done
                        └─failed─▶ unpaid       └─reject──▶ rejected (refund due)
+    An admin may pause a running one (its days wait for it) and resume it,
+    or stop it early (done, the undelivered share owed back).
     """
     KIND_POST, KIND_PROFILE, KIND_PRODUCT, KIND_BOOK, KIND_SERVICE = 'post', 'profile', 'product', 'book', 'service'
     KIND_CHOICES = [(k, k.title()) for k in (KIND_POST, KIND_PROFILE, KIND_PRODUCT, KIND_BOOK, KIND_SERVICE)]
-    UNPAID, PAYING, REVIEW, ACTIVE, DONE, REJECTED, CANCELLED = (
-        'unpaid', 'paying', 'review', 'active', 'done', 'rejected', 'cancelled')
-    STATUS_CHOICES = [(s, s.title()) for s in (UNPAID, PAYING, REVIEW, ACTIVE, DONE, REJECTED, CANCELLED)]
+    UNPAID, PAYING, REVIEW, ACTIVE, PAUSED, DONE, REJECTED, CANCELLED = (
+        'unpaid', 'paying', 'review', 'active', 'paused', 'done', 'rejected', 'cancelled')
+    STATUS_CHOICES = [(s, s.title()) for s in (UNPAID, PAYING, REVIEW, ACTIVE, PAUSED, DONE, REJECTED, CANCELLED)]
 
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='promotions')
     kind = models.CharField(max_length=10, choices=KIND_CHOICES)
@@ -4291,6 +4295,7 @@ class Promotion(models.Model):
     refund_due = models.BooleanField(default=False)
     starts_at = models.DateTimeField(null=True, blank=True)
     ends_at = models.DateTimeField(null=True, blank=True)
+    paused_at = models.DateTimeField(null=True, blank=True)   # while paused by an admin
     views = models.PositiveIntegerField(default=0)
     clicks = models.PositiveIntegerField(default=0)
     follows = models.PositiveIntegerField(default=0)

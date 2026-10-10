@@ -4,17 +4,21 @@
  * (everyone, or chosen counties), and pay by M-Pesa. Then it waits for the
  * phone: once paid it goes to the admins to approve, and runs from then.
  *
- * route.params: { kind, targetId?, title? } for a new one, or
- *               { promotionId } to finish paying for one already made.
+ * Like TikTok's promote: first choose WHAT (one of your posts, products,
+ * books or services, or your profile for more followers), then how far it
+ * goes and who sees it, then pay.
+ *
+ * route.params: {} to choose; { kind, targetId?, title?, picture? } to start
+ *               with that chosen; { promotionId } to finish paying for one.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  fetchPromotionPackages, createPromotion, payPromotion, fetchPromotion,
+  fetchPromotionPackages, createPromotion, payPromotion, fetchPromotion, fetchPromotable,
 } from '../services/api';
 import { useI18n } from '../context/I18nContext';
 import { colors, spacing, radius } from '../constants/theme';
@@ -25,6 +29,61 @@ const KIND_ICON = { post: 'images-outline', profile: 'person-outline', product: 
   book: 'book-outline', service: 'briefcase-outline' };
 
 export const formatViews = (n) => Number(n || 0).toLocaleString();
+
+// The first step's tabs, each with what the promotion gets you.
+export const KINDS = ['post', 'product', 'book', 'service', 'profile'];
+
+/** Step one: which of my things? A grid per kind; one already being promoted
+ *  can't be chosen again until that promotion ends. */
+const Chooser = ({ t, onPick }) => {
+  const [kind, setKind] = useState('post');
+  const [rows, setRows] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    setFailed(false);
+    fetchPromotable(kind).then((r) => { if (live) setRows(Array.isArray(r) ? r : []); })
+      .catch(() => { if (live) setFailed(true); });
+    return () => { live = false; };
+  }, [kind]);
+  return (
+    <View testID="promote-chooser">
+      <Text style={styles.chooseTitle}>{t('promote.chooseTitle')}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.kindTabs}>
+        {KINDS.map((k) => (
+          <TouchableOpacity key={k} style={[styles.kindTab, kind === k && styles.kindTabOn]} onPress={() => setKind(k)}
+                            accessibilityRole="tab" accessibilityState={{ selected: kind === k }}
+                            testID={`promote-kind-${k}`}>
+            <Ionicons name={KIND_ICON[k]} size={16} color={kind === k ? colors.white : colors.textSecondary} />
+            <Text style={[styles.kindTabText, kind === k && styles.kindTabTextOn]}>{t(`promote.tab.${k}`)}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+      <Text style={styles.goal}>{t(`promote.goal.${kind}`)}</Text>
+      {failed ? <Text style={styles.error}>{t('promote.loadFailed')}</Text>
+        : rows === null ? <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+          : rows.length === 0 ? <Text style={styles.note}>{t(`promote.noneOf.${kind}`)}</Text> : (
+            <View style={styles.grid}>
+              {rows.map((r) => (
+                <TouchableOpacity key={r.id} style={[styles.tile, r.busy && styles.tileBusy]} disabled={r.busy}
+                                  onPress={() => onPick({ kind, id: kind === 'profile' ? null : r.id,
+                                    title: r.title, picture: r.picture })}
+                                  accessibilityRole="button" testID={`promote-pick-${kind}-${r.id}`}>
+                  {r.picture ? <Image source={{ uri: r.picture }} style={styles.tileImg} />
+                    : <View style={[styles.tileImg, styles.tileEmpty]}>
+                        <Ionicons name={KIND_ICON[kind]} size={26} color={colors.textMuted} />
+                      </View>}
+                  <Text style={styles.tileTitle} numberOfLines={2}>{r.title || t(`promote.kind.${kind}`)}</Text>
+                  {r.detail ? <Text style={styles.tileDetail} numberOfLines={1}>{r.detail}</Text> : null}
+                  {r.busy ? <Text style={styles.tileBusyText}>{t('promote.alreadyRunning')}</Text> : null}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+    </View>
+  );
+};
 
 const errorText = (e, t) => e?.response?.data?.error || e?.data?.error || t('promote.failed');
 
@@ -38,6 +97,11 @@ const Promote = ({ navigation, route }) => {
   const [search, setSearch] = useState('');
   const [phone, setPhone] = useState('');
   const [promotion, setPromotion] = useState(null);
+  // What is being promoted: given by the screen that opened this, or chosen
+  // here first (the TikTok way). A promotion already made fixes it.
+  const [target, setTarget] = useState(() => (params.kind
+    ? { kind: params.kind, id: params.targetId ?? null, title: params.title, picture: params.picture }
+    : null));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // No answer from M-Pesa in the waiting time: say so, and offer another prompt.
@@ -62,7 +126,7 @@ const Promote = ({ navigation, route }) => {
     }
   }, [params.promotionId, t]);
 
-  const kind = promotion?.kind || params.kind || 'post';
+  const kind = promotion?.kind || target?.kind || 'post';
   const chosen = catalog?.packages?.find((p) => p.key === pkg);
   const status = promotion?.status;
   const waiting = status === 'paying';
@@ -95,7 +159,7 @@ const Promote = ({ navigation, route }) => {
       let p = promotion;
       if (!p || p.status === 'cancelled') {
         p = await createPromotion({
-          kind, target_id: params.targetId ?? null, package: pkg, counties: everyone ? [] : counties,
+          kind, target_id: target?.id ?? null, package: pkg, counties: everyone ? [] : counties,
         });
         setPromotion(p);
       }
@@ -109,7 +173,7 @@ const Promote = ({ navigation, route }) => {
     } finally {
       setBusy(false);
     }
-  }, [phone, everyone, counties, promotion, kind, params.targetId, pkg, t]);
+  }, [phone, everyone, counties, promotion, kind, target, pkg, t]);
 
   // Once made, its package and audience are what the server holds (and what
   // the price is for): shown, not changeable. To change them, cancel it.
@@ -151,14 +215,25 @@ const Promote = ({ navigation, route }) => {
         <Text style={styles.resultText}>{t('promote.checkPhoneBody', { amount: formatViews(promotion.price) })}</Text>
       </View>
     );
+  } else if (!promotion && !target && !params.promotionId) {
+    body = <Chooser t={t} onPick={setTarget} />;
   } else {
+    const shown = target || { kind, title: promotion?.target && (promotion.target.title || promotion.target.name
+      || promotion.target.caption || (promotion.target.username && `@${promotion.target.username}`)) };
     body = (
       <>
-        <View style={styles.what}>
-          <Ionicons name={KIND_ICON[kind] || 'megaphone-outline'} size={20} color={colors.primary} />
-          <Text style={styles.whatText} numberOfLines={2}>
-            {t(`promote.kind.${kind}`)}{params.title ? ` · ${params.title}` : ''}
-          </Text>
+        <View style={styles.what} testID="promote-chosen">
+          {shown.picture ? <Image source={{ uri: shown.picture }} style={styles.whatImg} />
+            : <Ionicons name={KIND_ICON[kind] || 'megaphone-outline'} size={20} color={colors.primary} />}
+          <View style={styles.whatTextBox}>
+            <Text style={styles.whatKind}>{t(`promote.goal.${kind}`)}</Text>
+            <Text style={styles.whatText} numberOfLines={2}>{shown.title || t(`promote.kind.${kind}`)}</Text>
+          </View>
+          {!promotion && !params.kind ? (
+            <TouchableOpacity onPress={() => setTarget(null)} hitSlop={8} testID="promote-change">
+              <Text style={styles.link}>{t('promote.change')}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <Text style={styles.label}>{t('promote.package')}</Text>
@@ -258,7 +333,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: radius.md,
     backgroundColor: 'rgba(10,22,40,0.85)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
   },
-  whatText: { flex: 1, color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  whatText: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  whatTextBox: { flex: 1 },
+  whatKind: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  whatImg: { width: 48, height: 48, borderRadius: 8, backgroundColor: '#0F1C30' },
+  chooseTitle: { color: colors.textPrimary, fontSize: 20, fontWeight: '800', marginBottom: spacing.sm },
+  kindTabs: { gap: 8, paddingVertical: 4 },
+  kindTab: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9,
+    borderRadius: radius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
+  },
+  kindTabOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  kindTabText: { color: colors.textSecondary, fontWeight: '700' },
+  kindTabTextOn: { color: colors.white },
+  goal: { color: colors.textSecondary, fontSize: 13.5, marginTop: spacing.sm, marginBottom: spacing.sm },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  tile: {
+    width: '31%', borderRadius: radius.md, overflow: 'hidden', paddingBottom: 6,
+    backgroundColor: 'rgba(10,22,40,0.88)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  tileBusy: { opacity: 0.5 },
+  tileImg: { width: '100%', aspectRatio: 1, backgroundColor: '#0F1C30' },
+  tileEmpty: { alignItems: 'center', justifyContent: 'center' },
+  tileTitle: { color: colors.textPrimary, fontSize: 12.5, fontWeight: '700', paddingHorizontal: 6, marginTop: 4 },
+  tileDetail: { color: colors.textSecondary, fontSize: 11.5, paddingHorizontal: 6 },
+  tileBusyText: { color: '#FFC857', fontSize: 11, fontWeight: '700', paddingHorizontal: 6 },
   label: { color: colors.textSecondary, fontSize: 12, fontWeight: '800', letterSpacing: 1, marginTop: spacing.md, textTransform: 'uppercase' },
   pack: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: radius.md,

@@ -184,6 +184,18 @@ const VideoItem = ({
   }, [isActive, handleDoubleTapLike]);
 
   const retry = () => { setErrored(false); setLoading(true); setShown(false); setAttempt((n) => n + 1); };
+  // A failed load is tried again by itself twice (a phone connection blips),
+  // a moment apart, before "unavailable" with its Retry button.
+  const autoTries = useRef(0);
+  const failedToLoad = () => {
+    if (autoTries.current < 2) {
+      autoTries.current += 1;
+      setTimeout(retry, 1500 * autoTries.current);
+      return;
+    }
+    setErrored(true);
+    setLoading(false);
+  };
 
   // A spinner only for a clip that is taking its time.
   useEffect(() => {
@@ -218,7 +230,7 @@ const VideoItem = ({
           // The first frame on screen also ends the wait: a clip already in
           // the cache can finish loading before the load listener is attached.
           onReadyForDisplay={() => { setLoading(false); setShown(true); }}
-          onError={() => { setErrored(true); setLoading(false); }}
+          onError={failedToLoad}
         />
       ) : null}
 
@@ -231,6 +243,10 @@ const VideoItem = ({
                 pointerEvents="none" testID={`poster-${item.id}`} />
       ) : null}
 
+      {/* No poster to show while it loads: the app's navy, not a black box. */}
+      {!item.thumbnail_url && loading && !errored ? (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0F1C30' }]} pointerEvents="none" />
+      ) : null}
       {loading && slow && !errored && uri && load ? (
         <View style={[StyleSheet.absoluteFill, styles.center]} pointerEvents="none">
           <ActivityIndicator size="large" color="#fff" />

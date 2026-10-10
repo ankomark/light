@@ -28,7 +28,7 @@ from .models import Product, Promotion, PromotionPackage, PromotionView, Publica
 
 logger = logging.getLogger(__name__)
 
-LIVE = (Promotion.PAYING, Promotion.REVIEW, Promotion.ACTIVE)
+LIVE = (Promotion.PAYING, Promotion.REVIEW, Promotion.ACTIVE, Promotion.PAUSED)
 
 KENYA_COUNTIES = (
     'Baringo', 'Bomet', 'Bungoma', 'Busia', 'Elgeyo-Marakwet', 'Embu', 'Garissa', 'Homa Bay', 'Isiolo',
@@ -231,6 +231,85 @@ def reject(promotion, admin, note):
     return promotion
 
 
+def pause(promotion):
+    """An admin holds a running promotion: not shown, its days wait for it."""
+    if promotion.status != Promotion.ACTIVE:
+        raise Refused('state', 'Only a running promotion can be paused.')
+    promotion.status, promotion.paused_at = Promotion.PAUSED, timezone.now()
+    promotion.save(update_fields=['status', 'paused_at', 'updated_at'])
+    return promotion
+
+
+def resume(promotion):
+    """Running again, with the days it was paused added to its end."""
+    if promotion.status != Promotion.PAUSED:
+        raise Refused('state', 'Only a paused promotion can be resumed.')
+    held = timezone.now() - (promotion.paused_at or timezone.now())
+    promotion.status, promotion.paused_at = Promotion.ACTIVE, None
+    if promotion.ends_at:
+        promotion.ends_at = promotion.ends_at + held
+    promotion.save(update_fields=['status', 'paused_at', 'ends_at', 'updated_at'])
+    return promotion
+
+
+def stop(promotion, note=''):
+    """An admin ends it early: done, with the undelivered share owed back."""
+    if promotion.status not in (Promotion.ACTIVE, Promotion.PAUSED):
+        raise Refused('state', 'Only a running or paused promotion can be stopped.')
+    promotion.status, promotion.paused_at = Promotion.DONE, None
+    promotion.refund_due = promotion.views < promotion.views_target
+    if note:
+        promotion.review_note = (f'{promotion.review_note} · Stopped: {note}' if promotion.review_note
+                                 else f'Stopped: {note}')[:500]
+    promotion.save()
+    _tell(promotion, 'Your promotion was stopped by the Adventist Life team'
+          + (f': {note[:120]}.' if note else '.')
+          + (' The part not delivered will be refunded.' if promotion.refund_due else ''))
+    return promotion
+
+
+def promotable(owner, kind, limit=60):
+    """The owner's own things that can be promoted now, newest first, each
+    with a picture and whether it is already being promoted."""
+    from .media import resolve
+    live = Promotion.objects.filter(owner=owner, status__in=LIVE)
+    out = []
+    if kind == Promotion.KIND_POST:
+        busy = set(live.values_list('post_id', flat=True))
+        rows = (SocialPost.objects.filter(user=owner, is_removed=False, visibility=SocialPost.VISIBILITY_PUBLIC)
+                .select_related('product', 'service').prefetch_related('product__images')
+                .order_by('-created_at')[:limit])
+        from .serializers.social import card_picture
+        for p in rows:
+            pic = resolve(p.thumbnail) or (resolve(p.media_file) if p.content_type in ('image', 'book') else None)                 or card_picture(p) or ''
+            out.append({'id': p.id, 'title': (p.caption or '')[:80], 'picture': pic,
+                        'content_type': p.content_type, 'busy': p.id in busy})
+    elif kind == Promotion.KIND_PRODUCT:
+        busy = set(live.values_list('product_id', flat=True))
+        from .serializers.social import _first_product_image
+        rows = (Product.objects.filter(seller=owner, is_removed=False, is_available=True)
+                .prefetch_related('images').order_by('-created_at')[:limit])
+        out = [{'id': p.id, 'title': p.title, 'picture': _first_product_image(p),
+                'detail': f'{p.currency} {p.price:,.0f}', 'busy': p.id in busy} for p in rows]
+    elif kind == Promotion.KIND_BOOK:
+        busy = set(live.values_list('publication_id', flat=True))
+        rows = Publication.objects.filter(author=owner, is_removed=False, status='published').order_by('-created_at')[:limit]
+        out = [{'id': p.id, 'title': p.title, 'picture': resolve(p.cover) or '', 'busy': p.id in busy} for p in rows]
+    elif kind == Promotion.KIND_SERVICE:
+        busy = set(live.values_list('service_id', flat=True))
+        rows = Videostudio.objects.filter(created_by=owner, is_removed=False).order_by('-created_at')[:limit]
+        out = [{'id': s.id, 'title': s.name, 'picture': resolve(s.cover_image) or resolve(s.logo) or '',
+                'detail': s.location or '', 'busy': s.id in busy} for s in rows]
+    elif kind == Promotion.KIND_PROFILE:
+        prof = getattr(owner, 'profile', None)
+        out = [{'id': owner.pk, 'title': f'@{owner.username}', 'picture': resolve(getattr(prof, 'picture', '') or '') or '',
+                'detail': f'{owner.followers.count():,} followers',
+                'busy': live.filter(kind=Promotion.KIND_PROFILE).exists()}]
+    else:
+        raise Refused('kind', 'That cannot be promoted.')
+    return out
+
+
 def finish_expired(now=None):
     """Promotions whose days are up: done; short of their views, a refund of
     the difference is due. Cheap; run on serve and by cron."""
@@ -422,7 +501,7 @@ def summary(promotion):
         'price': p.price, 'views_target': p.views_target, 'days': p.days, 'counties': p.counties,
         'views': p.views, 'clicks': p.clicks, 'follows': p.follows,
         'payment_note': p.payment_note, 'mpesa_receipt': p.mpesa_receipt, 'payment_phone': p.payment_phone,
-        'paid_at': p.paid_at, 'starts_at': p.starts_at, 'ends_at': p.ends_at,
+        'paid_at': p.paid_at, 'starts_at': p.starts_at, 'ends_at': p.ends_at, 'paused_at': p.paused_at,
         'review_note': p.review_note, 'refund_due': p.refund_due, 'refund_owed': refund_owed(p),
         'created_at': p.created_at,
     }

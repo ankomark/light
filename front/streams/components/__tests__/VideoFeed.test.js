@@ -117,11 +117,18 @@ test('leaving the page reports how long the clip was watched', async () => {
   expect(mockApi.logWatchEvents).toHaveBeenCalledWith([expect.objectContaining({ post_id: 1 })]);
 });
 
-test('a clip that will not play says so and can be tried again', async () => {
+test('a clip that will not play is tried again by itself twice, then says so and can be retried', async () => {
   mockApi.fetchSocialPosts.mockResolvedValue({ results: [video(1)], next: null });
   const screen = render(<VideoFeed />);
   await waitFor(() => expect(screen.getByTestId('app-video')).toBeTruthy());
+  jest.useFakeTimers();
+  for (const wait of [1500, 3000]) {
+    await act(async () => { screen.getByTestId('app-video').props.onError(new Error('404')); });
+    expect(screen.queryByTestId('video-failed-1')).toBeNull();      // a blip: tried again, not given up
+    await act(async () => { jest.advanceTimersByTime(wait); });
+  }
   await act(async () => { screen.getByTestId('app-video').props.onError(new Error('404')); });
+  jest.useRealTimers();
   expect(screen.getByTestId('video-failed-1')).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByText('feed.retry')); });
   expect(screen.getByTestId('app-video')).toBeTruthy();

@@ -30,8 +30,8 @@ def _refused(exc):
 
 
 def _package(p):
-    return {'key': p.key, 'name': p.name, 'price': p.price, 'views': p.views, 'days': p.days,
-            'is_active': p.is_active}
+    return {'key': p.key, 'name': p.name, 'description': p.description, 'price': p.price, 'views': p.views,
+            'days': p.days, 'is_active': p.is_active, 'order': p.order}
 
 
 def _mine(request, pk):
@@ -48,6 +48,18 @@ class PromotionPackages(APIView):
             'packages': [_package(p) for p in PromotionPackage.objects.filter(is_active=True)],
             'counties': list(promo.KENYA_COUNTIES),
         })
+
+
+class PromotionPromotable(APIView):
+    """GET ?kind=post|product|book|service|profile: my things that can be
+    promoted (the first step of promoting, as on TikTok: choose what)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            return Response(promo.promotable(request.user, request.query_params.get('kind', 'post')))
+        except promo.Refused as exc:
+            return _refused(exc)
 
 
 class Promotions(APIView):
@@ -160,6 +172,12 @@ class AdminPromotionAction(APIView):
                 promo.approve(p, request.user)
             elif action == 'reject':
                 promo.reject(p, request.user, note)
+            elif action == 'pause':
+                promo.pause(p)
+            elif action == 'resume':
+                promo.resume(p)
+            elif action == 'stop':
+                promo.stop(p, note)
             elif action == 'refunded':
                 # The money went back by M-Pesa, by hand: recorded here.
                 if not p.refund_due:
@@ -177,16 +195,56 @@ class AdminPromotionAction(APIView):
         return Response(promo.summary(p))
 
 
+PACKAGE_LIMITS = (('price', 10, 150_000), ('views', 100, 1_000_000), ('days', 1, 60))
+
+
 class AdminPromotionPackages(APIView):
+    """The plans: list, add, change, hide, delete."""
     permission_classes = [Cap('manage_promotions')]
 
     def get(self, request):
         return Response([_package(p) for p in PromotionPackage.objects.all()])
 
+    def post(self, request):
+        from django.utils.text import slugify
+        name = str(request.data.get('name') or '').strip()[:60]
+        if not name:
+            return Response({'error': 'Give the plan a name.'}, status=status.HTTP_400_BAD_REQUEST)
+        values = {}
+        for field, lo, hi in PACKAGE_LIMITS:
+            try:
+                value = int(request.data.get(field))
+            except (TypeError, ValueError):
+                return Response({'error': f'{field} must be a number.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not lo <= value <= hi:
+                return Response({'error': f'{field} must be between {lo:,} and {hi:,}.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            values[field] = value
+        base = slugify(name)[:24] or 'plan'
+        key, n = base, 2
+        while PromotionPackage.objects.filter(key=key).exists():
+            key, n = f'{base}-{n}', n + 1
+        last = PromotionPackage.objects.order_by('-order').values_list('order', flat=True).first() or 0
+        p = PromotionPackage.objects.create(
+            key=key, name=name, description=str(request.data.get('description') or '').strip()[:160],
+            order=last + 1, is_active=bool(request.data.get('is_active', True)), **values)
+        log_admin_action(request.user, 'promotion_package_add', 'promotionpackage', p.pk, name)
+        return Response(_package(p), status=status.HTTP_201_CREATED)
+
+    def delete(self, request, key):
+        p = get_object_or_404(PromotionPackage, key=key)
+        if p.promotions.exists():
+            # Bought before: its promotions keep pointing at it. Hidden instead.
+            return Response({'error': 'People have bought this plan, so it can only be hidden, not deleted.',
+                             'code': 'in_use'}, status=status.HTTP_409_CONFLICT)
+        log_admin_action(request.user, 'promotion_package_delete', 'promotionpackage', p.pk, p.name)
+        p.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def patch(self, request, key):
         p = get_object_or_404(PromotionPackage, key=key)
         changed = []
-        for field, lo, hi in (('price', 10, 150_000), ('views', 100, 1_000_000), ('days', 1, 60)):
+        for field, lo, hi in PACKAGE_LIMITS + (('order', 0, 1000),):
             if field in request.data:
                 try:
                     value = int(request.data[field])
@@ -203,6 +261,51 @@ class AdminPromotionPackages(APIView):
         if 'name' in request.data and str(request.data['name']).strip():
             p.name = str(request.data['name']).strip()[:60]
             changed.append('name')
+        if 'description' in request.data:
+            p.description = str(request.data['description'] or '').strip()[:160]
+            changed.append('description')
         p.save()
         log_admin_action(request.user, 'promotion_package', 'promotionpackage', p.pk, ', '.join(changed)[:200])
         return Response(_package(p))
+
+
+# ── where the money goes: the platform till, kept on the ticketing server ────
+
+class AdminPromotionTill(APIView):
+    """GET: the till promotion payments go to. PUT {till}: change it, only
+    to a till that passed a KES 1 test in the last 24 hours (POST test/), the
+    proof Safaricom has linked it, as for organisers' tills."""
+    permission_classes = [Cap('manage_promotions')]
+
+    def get(self, request):
+        from .admin_tickets import _relay
+        from .. import ticketing_staff
+        return _relay(lambda: ticketing_staff.call(request.user, 'GET', 'platform-till/'))
+
+    def put(self, request):
+        from .admin_tickets import _relay
+        from .. import ticketing_staff
+        till = str(request.data.get('till') or '').strip()
+        res = _relay(lambda: ticketing_staff.call(request.user, 'PUT', 'platform-till/', body={'till': till}))
+        if res.status_code == 200:
+            log_admin_action(request.user, 'promotion_till', 'platformtill', 0, till)
+        return res
+
+
+class AdminPromotionTillTest(APIView):
+    """POST {till, phone}: a KES 1 prompt to `phone`, paying into `till`.
+    GET ?till=: how the latest test of that till went."""
+    permission_classes = [Cap('manage_promotions')]
+
+    def post(self, request):
+        from .admin_tickets import _relay
+        from .. import ticketing_staff
+        body = {'till': str(request.data.get('till') or '').strip(),
+                'phone': str(request.data.get('phone') or '').strip()}
+        return _relay(lambda: ticketing_staff.call(request.user, 'POST', 'platform-till/test/', body=body))
+
+    def get(self, request):
+        from .admin_tickets import _relay
+        from .. import ticketing_staff
+        return _relay(lambda: ticketing_staff.call(request.user, 'GET', 'platform-till/test/',
+                                                   params={'till': request.query_params.get('till', '')}))

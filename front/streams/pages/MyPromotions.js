@@ -96,7 +96,10 @@ const MyPromotions = ({ navigation }) => {
           <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>{t('promote.mine')}</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity onPress={() => navigation.navigate('Promote')} hitSlop={10} accessibilityRole="button"
+                          accessibilityLabel={t('promote.new')} testID="promotions-new">
+          <Ionicons name="add-circle" size={28} color={colors.primary} />
+        </TouchableOpacity>
       </View>
       {rows === null && !failed ? <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} /> : (
         <FlatList

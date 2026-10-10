@@ -28,10 +28,13 @@ jest.mock('../VerseShareSheet', () => {
 });
 
 const { default: ItemPostMedia, formatPrice } = require('../ItemPostMedia');
-const { default: FeedVerseCard, _resetFeedVerse } = require('../FeedVerseCard');
+const { default: FeedVerseCard, _resetFeedVerse, markVersePassed } = require('../FeedVerseCard');
+const AsyncStorageModule = require('@react-native-async-storage/async-storage');
+const AsyncStorage = AsyncStorageModule.default || AsyncStorageModule;
 const { default: ShareToFeedSwitch } = require('../ShareToFeedSwitch');
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
   jest.useFakeTimers();
   mockNavigate.mockReset();
   mockFetchVerse.mockReset();
@@ -106,4 +109,35 @@ test('the share switch says what it does and can be turned off', () => {
   expect(screen.getByText('shareToFeed.label')).toBeTruthy();
   fireEvent(screen.getByTestId('share-to-feed'), 'valueChange', false);
   expect(onChange).toHaveBeenCalledWith(false);
+});
+
+test('passed today: the next launch starts without it; a new day brings it back', async () => {
+  jest.useRealTimers();
+  mockFetchVerse.mockResolvedValue({ text: 'Be still', reference: 'Psalm 46:10', date: '2026-10-10' });
+  markVersePassed(7);
+  await new Promise((r) => setTimeout(r, 0));
+  const screen = render(<FeedVerseCard width={390} userId={7} />);
+  await waitFor(() => expect(mockFetchVerse).not.toHaveBeenCalled());
+  await new Promise((r) => setTimeout(r, 20));
+  expect(screen.queryByTestId('feed-verse')).toBeNull();
+
+  // Someone else on the same phone hasn't seen it.
+  const other = render(<FeedVerseCard width={390} userId={8} />);
+  await waitFor(() => expect(other.getByTestId('feed-verse')).toBeTruthy());
+
+  // Seen on an earlier day: shown again.
+  await AsyncStorage.setItem('feedVerse:passed:7', '2000-01-01');
+  _resetFeedVerse();
+  const tomorrow = render(<FeedVerseCard width={390} userId={7} />);
+  await waitFor(() => expect(tomorrow.getByTestId('feed-verse')).toBeTruthy());
+});
+
+test('it says where it ends, so scrolling past it can be noticed', async () => {
+  jest.useRealTimers();
+  mockFetchVerse.mockResolvedValue({ text: 'Be still', reference: 'Psalm 46:10', date: '2026-10-10' });
+  const onBottom = jest.fn();
+  const screen = render(<FeedVerseCard width={390} userId={3} onBottom={onBottom} />);
+  await waitFor(() => expect(screen.getByTestId('feed-verse')).toBeTruthy());
+  fireEvent(screen.getByTestId('feed-verse'), 'layout', { nativeEvent: { layout: { y: 120, height: 540 } } });
+  expect(onBottom).toHaveBeenCalledWith(660);
 });
