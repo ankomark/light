@@ -1,7 +1,7 @@
 // Ask a service for a booking (a day, and a time if it matters) or a quote
 // (say what for). The provider accepts or declines; both sides are told.
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from '../BottomSheet';
 import useKeyboardHeight from '../../hooks/useKeyboardHeight';
@@ -9,6 +9,7 @@ import { requestServiceBooking } from '../../services/api';
 import { DAYS } from '../../services/servicesCatalog';
 import { notify } from '../../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../../constants/theme';
+import { EmojiTextInput } from '../EmojiKeyboard';
 
 const DAYS_AHEAD = 14;
 export const TIMES = ['', '09:00', '12:00', '15:00', '18:00'];
@@ -103,7 +104,7 @@ const BookingSheet = ({ visible, onClose, service, t, onSent, initialKind = 'boo
         ) : null}
 
         <Text style={styles.label}>{kind === 'quote' ? t('bookings.quoteWhat') : t('bookings.note')}</Text>
-        <TextInput style={styles.input} value={note} onChangeText={setNote} multiline maxLength={1000} textAlignVertical="top"
+        <EmojiTextInput style={styles.input} value={note} onChangeText={setNote} multiline maxLength={1000} textAlignVertical="top"
           placeholder={kind === 'quote' ? t('bookings.quotePlaceholder') : t('bookings.notePlaceholder')}
           placeholderTextColor={colors.placeholder} testID="booking-note" />
 

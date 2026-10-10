@@ -3,7 +3,7 @@
 // owner's public reply, and, for the owner, Reply. A review can be
 // reported. Drawn at once from the last copy, then fresh.
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from '../BottomSheet';
 import ReportModal from '../ReportModal';
@@ -16,6 +16,7 @@ import useKeyboardHeight from '../../hooks/useKeyboardHeight';
 import { userKey } from '../../utils/screenCache';
 import { confirmAction, notify } from '../../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../../constants/theme';
+import { EmojiTextInput } from '../EmojiKeyboard';
 
 const when = (iso) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } };
 
@@ -178,7 +179,7 @@ const ServiceReviews = ({ service, uid, t, isAuthenticated, navigation, skin }) 
           ) : (
             <StarRow value={draft.rating} size={34} onPick={(n) => setDraft((d) => ({ ...d, rating: n }))} testPrefix="service-star" />
           )}
-          <TextInput style={styles.input} value={draft.body} onChangeText={(v) => setDraft((d) => ({ ...d, body: v }))}
+          <EmojiTextInput style={styles.input} value={draft.body} onChangeText={(v) => setDraft((d) => ({ ...d, body: v }))}
             placeholder={sheet?.kind === 'reply' ? t('services.replyPlaceholder') : t('services.reviewPlaceholder')}
             placeholderTextColor={colors.placeholder} multiline maxLength={2000} textAlignVertical="top" testID="service-review-input" />
           {sheet?.kind === 'review' && data.mine ? (

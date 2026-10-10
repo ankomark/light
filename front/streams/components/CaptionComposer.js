@@ -9,8 +9,9 @@
 // help text: tapping "# Hashtag" or "@ Mention" types the symbol at the cursor
 // and opens the suggestions straight away.
 import React, { useRef, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Keyboard } from 'react-native';
 import { useTokenSuggestions, useForcedSelection, SuggestionList } from './MentionSuggestions';
+import { EmojiToggle, EmojiPanel } from './EmojiKeyboard';
 import { colors, radius, spacing } from '../constants/theme';
 
 const CaptionComposer = ({ value, onChangeText, placeholder, maxLength, postsLabel, hints }) => {
@@ -38,10 +39,28 @@ const CaptionComposer = ({ value, onChangeText, placeholder, maxLength, postsLab
     inputRef.current?.focus();
   };
 
+  // Emoji go in at the cursor, through the same path as a completed tag.
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const insertEmoji = (emoji) => {
+    const at = selection.end ?? value.length;
+    const from = Math.min(selection.start ?? at, at);
+    apply({ text: value.slice(0, from) + emoji + value.slice(at), cursor: from + emoji.length });
+  };
+  const toggleEmoji = () => {
+    if (emojiOpen) {
+      setEmojiOpen(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } else {
+      Keyboard.dismiss();
+      setEmojiOpen(true);
+    }
+  };
+
   return (
     <View>
       <TextInput
         ref={inputRef}
+        onFocus={() => setEmojiOpen(false)}
         style={styles.input}
         placeholder={placeholder}
         placeholderTextColor={colors.placeholder}
@@ -67,6 +86,8 @@ const CaptionComposer = ({ value, onChangeText, placeholder, maxLength, postsLab
       <View style={styles.footer}>
         {hints ? (
           <View style={styles.hints}>
+            <EmojiToggle open={emojiOpen} onPress={toggleEmoji} color={colors.primary} size={22}
+                         style={styles.emojiToggle} testID="caption-emoji" />
             <TouchableOpacity style={styles.hint} onPress={() => insertTrigger('#')} accessibilityLabel={hints.hashtag}>
               <Text style={styles.hintSymbol}>#</Text>
               <Text style={styles.hintText}>{hints.hashtag}</Text>
@@ -76,9 +97,13 @@ const CaptionComposer = ({ value, onChangeText, placeholder, maxLength, postsLab
               <Text style={styles.hintText}>{hints.mention}</Text>
             </TouchableOpacity>
           </View>
-        ) : <View />}
+        ) : (
+          <EmojiToggle open={emojiOpen} onPress={toggleEmoji} color={colors.primary} size={22}
+                       style={styles.emojiToggle} testID="caption-emoji" />
+        )}
         {maxLength ? <Text style={styles.count}>{value.length}/{maxLength}</Text> : null}
       </View>
+      {emojiOpen && <EmojiPanel onPick={insertEmoji} style={styles.list} testID="caption-emoji-panel" />}
       {hints?.tip && !token && <Text style={styles.tip}>{hints.tip}</Text>}
     </View>
   );
@@ -88,7 +113,8 @@ const styles = StyleSheet.create({
   input: { minHeight: 96, color: colors.textPrimary, fontSize: 16, lineHeight: 22, textAlignVertical: 'top', padding: 0 },
   list: { marginTop: spacing.sm },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },
-  hints: { flexDirection: 'row', gap: spacing.xs },
+  hints: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  emojiToggle: { width: 34, height: 30 },
   hint: {
     flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5,
     borderRadius: radius.full, backgroundColor: 'rgba(29,161,242,0.12)',

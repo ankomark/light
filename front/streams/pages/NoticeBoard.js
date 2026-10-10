@@ -28,6 +28,7 @@ import { compressImage } from '../services/imageProcessing';
 import { uploadMedia } from '../services/cloudinary';
 import LinkedText from '../components/LinkedText';
 import { colors, typography, spacing, radius } from '../constants/theme';
+import { EmojiTextInput, useEmojiInput, EmojiToggle, EmojiPanel } from '../components/EmojiKeyboard';
 
 // Calm, not bright: smoked glass cards and the warm accent (no light blue).
 const GLASS = 'rgba(8,12,18,0.62)';
@@ -167,6 +168,8 @@ const NoticeBoard = ({ route, navigation }) => {
   const [myNotes, setMyNotes] = useState(null);
   const [replyFor, setReplyFor] = useState(null);
   const [replyText, setReplyText] = useState('');
+  const replyInputRef = useRef(null);
+  const replyEmoji = useEmojiInput({ value: replyText, onChangeText: setReplyText, maxLength: 2000, inputRef: replyInputRef });
 
   // Private note to admins (any user can write; only admins can read).
   const [noteVisible, setNoteVisible] = useState(false);
@@ -505,7 +508,7 @@ const NoticeBoard = ({ route, navigation }) => {
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <TextInput style={styles.input} placeholder={t('notice.titlePlaceholder')} placeholderTextColor={colors.placeholder}
                 value={title} onChangeText={setTitle} maxLength={200} testID="notice-title" />
-              <TextInput style={[styles.input, styles.bodyInput]} placeholder={t('notice.bodyPlaceholder')}
+              <EmojiTextInput style={[styles.input, styles.bodyInput]} placeholder={t('notice.bodyPlaceholder')}
                 placeholderTextColor={colors.placeholder} value={body} onChangeText={setBody} multiline
                 textAlignVertical="top" testID="notice-body" />
               <View style={styles.pinRow}>
@@ -642,14 +645,19 @@ const NoticeBoard = ({ route, navigation }) => {
                       </View>
                     ) : null}
                     {replyFor === item.id ? (
+                      <>
                       <View style={styles.replyEditor}>
-                        <TextInput style={[styles.input, styles.replyInput]} value={replyText} onChangeText={setReplyText}
+                        <EmojiToggle open={replyEmoji.open} onPress={replyEmoji.toggle} color={colors.textSecondary} testID={`reply-emoji-${item.id}`} />
+                        <TextInput ref={replyInputRef} {...replyEmoji.inputProps}
+                          style={[styles.input, styles.replyInput]} value={replyText} onChangeText={setReplyText}
                           placeholder={t('notice.replyPlaceholder')} placeholderTextColor={colors.placeholder} multiline
                           maxLength={2000} testID={`reply-input-${item.id}`} />
                         <TouchableOpacity style={styles.replySend} onPress={() => sendReply(item)} testID={`reply-send-${item.id}`}>
                           <Ionicons name="send" size={16} color="#0A1628" />
                         </TouchableOpacity>
                       </View>
+                      {replyEmoji.open && <EmojiPanel onPick={replyEmoji.insert} style={{ marginTop: 8 }} testID={`reply-emoji-panel-${item.id}`} />}
+                      </>
                     ) : null}
                     <View style={styles.noteActions}>
                       <TouchableOpacity style={styles.noteActionBtn} onPress={() => { setReplyFor(replyFor === item.id ? null : item.id); setReplyText(''); }}

@@ -17,6 +17,7 @@ import RotatingBackground from '../components/RotatingBackground';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { confirmAction, notify } from '../utils/adminConfirm';
+import { EmojiTextInput } from '../components/EmojiKeyboard';
 
 const NAVY = '#0A1628';
 
@@ -283,7 +284,7 @@ const GroupForm = ({ navigation, route }) => {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>{t(`${ns}.description`)}</Text>
-              <TextInput
+              <EmojiTextInput
                 style={[styles.input, styles.multilineInput]}
                 value={description}
                 onChangeText={setDescription}

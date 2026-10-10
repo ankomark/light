@@ -17,6 +17,7 @@ import { ORG_KINDS, ORG_ICON, OrgLogo } from './OrganizationPage';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
+import { EmojiTextInput } from '../components/EmojiKeyboard';
 
 const OrganizationEdit = ({ route, navigation }) => {
   const { t } = useI18n();
@@ -138,7 +139,7 @@ const OrganizationEdit = ({ route, navigation }) => {
             testID="org-website" />
 
           <Text style={styles.label}>{t('org.about')}</Text>
-          <TextInput style={[styles.input, styles.area]} value={form.description} onChangeText={set('description')}
+          <EmojiTextInput style={[styles.input, styles.area]} value={form.description} onChangeText={set('description')}
             maxLength={2000} multiline placeholder={t('org.aboutPlaceholder')} placeholderTextColor={colors.placeholder}
             testID="org-about" />
 

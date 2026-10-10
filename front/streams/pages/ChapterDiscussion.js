@@ -18,6 +18,7 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
+import { useEmojiInput, EmojiToggle, EmojiPanel } from '../components/EmojiKeyboard';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const MAX = 2000;
@@ -76,6 +77,7 @@ const ChapterDiscussion = ({ route, navigation }) => {
   const kbHeight = useKeyboardHeight();
   const insets = useSafeAreaInsets();
   const inputRef = useRef(null);
+  const emoji = useEmojiInput({ value: text, onChangeText: setText, maxLength: MAX, inputRef });
   // Reply: straight to typing it.
   useEffect(() => { if (replyTo) inputRef.current?.focus?.(); }, [replyTo]);
   const [sending, setSending] = useState(false);
@@ -214,8 +216,11 @@ const ChapterDiscussion = ({ route, navigation }) => {
               </View>
             ) : null}
             {isAuthenticated ? (
+              <>
               <View style={styles.inputRow}>
+                <EmojiToggle open={emoji.open} onPress={emoji.toggle} color={colors.textSecondary} testID="discussion-emoji" />
                 <TextInput
+                  {...emoji.inputProps}
                   style={styles.input}
                   value={text}
                   onChangeText={setText}
@@ -232,6 +237,8 @@ const ChapterDiscussion = ({ route, navigation }) => {
                     : <Ionicons name="send" size={18} color={colors.white} />}
                 </TouchableOpacity>
               </View>
+              {emoji.open && <EmojiPanel onPick={emoji.insert} style={{ marginTop: spacing.sm }} testID="discussion-emoji-panel" />}
+              </>
             ) : (
               <TouchableOpacity style={styles.btn} onPress={() => navigation.navigate('Login')}>
                 <Text style={styles.btnText}>{t('discussion.signIn')}</Text>

@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/useAuth';
 import { useI18n } from '../context/I18nContext';
 import { parseDay, formatDay } from '../utils/calendarDay';
+import { EmojiTextInput } from './EmojiKeyboard';
 
 const BIO_MAX = 150;
 // Shown as typed; the server reads "example.org" as https://example.org.
@@ -314,7 +315,7 @@ const CreateProfile = () => {
       {/* Bio Input */}
       <View style={styles.inputContainer}>
         <Text style={styles.label}>{t('createProfile.bio')}</Text>
-        <TextInput
+        <EmojiTextInput
           style={[styles.input, errors.bio && styles.inputError]}
           placeholder={t('createProfile.bioPlaceholder')}
           placeholderTextColor="#a0aec0"

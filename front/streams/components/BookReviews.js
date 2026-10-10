@@ -2,7 +2,7 @@
 // own review (to write once they've read some of the book, or change), and
 // others' reviews, more on request.
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
@@ -15,6 +15,7 @@ import { notePublicationsChanged } from '../services/publicationStore';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import ReportModal from './ReportModal';
+import { EmojiTextInput } from './EmojiKeyboard';
 
 export const StarRow = ({ value, size = 14, onPick, testPrefix, color }) => (
   <View style={styles.starRow}>
@@ -185,7 +186,7 @@ const BookReviews = ({ pubId, navigation, onChanged }) => {
       >
         <ScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <StarRow value={draft.rating} size={34} onPick={(n) => setDraft((d) => ({ ...d, rating: n }))} testPrefix="reviews-star" />
-          <TextInput
+          <EmojiTextInput
             style={styles.input}
             value={draft.body}
             onChangeText={(v) => setDraft((d) => ({ ...d, body: v }))}

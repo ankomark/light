@@ -11,6 +11,7 @@ import {
   GOLD, FACE, SinglesScreen, GoldButton, Label, Chip, Body,
 } from '../../components/singles/SinglesKit';
 import { PROMPTS, INTENTS, INTENT_ICON, MINISTRIES } from '../../components/singles/ProfileCard';
+import { EmojiTextInput } from '../../components/EmojiKeyboard';
 
 const MAX_PROMPTS = 3;
 const splitList = (text) => text.split(',').map((x) => x.trim()).filter(Boolean);
@@ -87,15 +88,19 @@ export default function SinglesEdit() {
     }
   };
 
-  const field = (key, label, opts = {}) => (
+  const field = (key, label, opts = {}) => {
+    // Emoji in the long answers (about me, what I'm looking for), not in names.
+    const Box = opts.multiline ? EmojiTextInput : TextInput;
+    return (
     <View style={styles.field}>
       <Label>{label}</Label>
-      <TextInput style={[styles.input, opts.multiline && styles.multi, errors[key] && styles.inputBad]}
+      <Box style={[styles.input, opts.multiline && styles.multi, errors[key] && styles.inputBad]}
         value={f[key]} onChangeText={set(key)} placeholder={opts.hint} placeholderTextColor={GOLD.muted}
         multiline={opts.multiline} maxLength={opts.max} accessibilityLabel={label} testID={`singles-field-${key}`} />
       {!!errors[key] && <Text style={styles.error}>{t('singles.edit.fieldBad')}</Text>}
     </View>
-  );
+    );
+  };
 
   return (
     <SinglesScreen title={t(creating ? 'singles.edit.createTitle' : 'singles.edit.title')} testID="singles-edit-screen"
@@ -179,7 +184,7 @@ export default function SinglesEdit() {
                 <Text style={styles.promptSign}>{open ? '−' : '+'}</Text>
               </TouchableOpacity>
               {open && (
-                <TextInput style={[styles.input, styles.multi]} value={answers[k]} multiline maxLength={200}
+                <EmojiTextInput style={[styles.input, styles.multi]} value={answers[k]} multiline maxLength={200}
                   onChangeText={(v) => setAnswers((a) => ({ ...a, [k]: v }))} placeholderTextColor={GOLD.muted}
                   accessibilityLabel={t(`singles.prompt.${k}`)} testID={`singles-answer-${k}`} />
               )}

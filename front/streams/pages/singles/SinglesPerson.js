@@ -18,6 +18,7 @@ import {
 } from '../../components/singles/SinglesKit';
 import ProfileCard from '../../components/singles/ProfileCard';
 import SafetySheet from '../../components/singles/SafetySheet';
+import { EmojiTextInput } from '../../components/EmojiKeyboard';
 
 export function starterText(t, s, name) {
   if (s.kind === 'prompt') return t('singles.starter.prompt', { prompt: t(`singles.prompt.${s.key}`), answer: s.answer });
@@ -100,7 +101,7 @@ export default function SinglesPerson() {
             <Text style={styles.iceQ}>{t(`singles.ice.q.${item.key}`)}</Text>
             {item.mine ? <Text style={styles.iceA}>{t('singles.ice.you', { answer: item.mine })}</Text> : (
               <View style={styles.iceReply}>
-                <TextInput style={styles.input} value={drafts[item.id] || ''} onChangeText={(v) => setDrafts((d) => ({ ...d, [item.id]: v }))}
+                <EmojiTextInput containerStyle={{ flex: 1 }} style={styles.input} value={drafts[item.id] || ''} onChangeText={(v) => setDrafts((d) => ({ ...d, [item.id]: v }))}
                   maxLength={300} placeholder={t('singles.ice.yours')} placeholderTextColor={GOLD.muted}
                   accessibilityLabel={t('singles.ice.yours')} testID={`singles-ice-input-${item.id}`} />
                 <TouchableOpacity style={styles.send} onPress={() => reply(item)} accessibilityRole="button"
@@ -180,7 +181,7 @@ function StorySheet({ visible, matchId, name, onClose }) {
           <Body style={{ fontSize: 14 }}>{t('singles.stories.tellLead', { name })}</Body>
           <TextInput style={styles.input} value={title} onChangeText={setTitle} maxLength={120} placeholder={t('singles.stories.titleHint')}
             placeholderTextColor={GOLD.muted} accessibilityLabel={t('singles.stories.titleHint')} />
-          <TextInput style={[styles.input, { minHeight: 120 }]} value={body} onChangeText={setBody} multiline maxLength={3000}
+          <EmojiTextInput style={[styles.input, { minHeight: 120 }]} value={body} onChangeText={setBody} multiline maxLength={3000}
             placeholder={t('singles.stories.bodyHint')} placeholderTextColor={GOLD.muted} accessibilityLabel={t('singles.stories.bodyHint')} />
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <GoldButton label={t('common.cancel')} kind="outline" onPress={onClose} />

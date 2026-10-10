@@ -13,6 +13,7 @@ import { compressImage } from '../services/imageProcessing';
 import PlaylistCover from './PlaylistCover';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { EmojiTextInput } from './EmojiKeyboard';
 
 const VISIBILITIES = [
   { key: 'private', icon: 'lock-closed' },
@@ -105,7 +106,7 @@ const EditPlaylistSheet = ({ visible, playlist, onClose, onSaved, onDelete }) =>
               />
 
               <Text style={styles.label}>{t('playlist.descriptionLabel')}</Text>
-              <TextInput
+              <EmojiTextInput
                 style={[styles.input, styles.multiline]}
                 value={description}
                 onChangeText={setDescription}

@@ -2,7 +2,7 @@
 // there as the book's card), with a few words of your own; or send it
 // elsewhere through the phone's share sheet.
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, Share, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Share, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
@@ -10,6 +10,7 @@ import { shareBookToFeed } from '../services/api';
 import { notify } from '../utils/adminConfirm';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { EmojiTextInput } from './EmojiKeyboard';
 
 const ShareBookSheet = ({ visible, onClose, book, quote = '', chapterId = null, chapterTitle = '', block = null, onPosted }) => {
   const { t } = useI18n();
@@ -62,7 +63,7 @@ const ShareBookSheet = ({ visible, onClose, book, quote = '', chapterId = null, 
             {quote ? <Text style={styles.quote} numberOfLines={3}>{`“${quote}”`}</Text> : null}
           </View>
         </View>
-        <TextInput style={styles.input} value={caption} onChangeText={setCaption} multiline maxLength={2200}
+        <EmojiTextInput style={styles.input} value={caption} onChangeText={setCaption} multiline maxLength={2200}
           placeholder={t('shareBook.captionPlaceholder')} placeholderTextColor={colors.placeholder} testID="share-book-caption" />
         <TouchableOpacity style={styles.post} onPress={post} disabled={busy} testID="share-book-post" accessibilityRole="button">
           {busy ? <ActivityIndicator color={colors.white} /> : (

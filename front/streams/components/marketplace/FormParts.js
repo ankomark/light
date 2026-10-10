@@ -5,6 +5,7 @@ import React, { forwardRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { formTheme as F } from './formTheme';
+import { EmojiTextInput } from '../EmojiKeyboard';
 
 /** A card with an icon, a heading and an optional line under it. */
 export const FormSection = ({ icon, title, hint, children, testID }) => (
@@ -37,8 +38,10 @@ export const Field = ({ label, note, error, children, style }) => (
 /** A dark input; its border turns gold while in use, red when wrong. */
 export const FormInput = forwardRef(({ style, invalid, multiline, onFocus, onBlur, ...rest }, ref) => {
   const [focused, setFocused] = useState(false);
+  // Emoji in product descriptions (multi-line), not in names or prices.
+  const Box = multiline ? EmojiTextInput : TextInput;
   return (
-    <TextInput
+    <Box
       ref={ref}
       placeholderTextColor={F.placeholder}
       selectionColor={F.accent}

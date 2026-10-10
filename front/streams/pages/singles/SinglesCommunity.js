@@ -2,7 +2,7 @@
 // matter most in a life partner?"). Someone can become interesting because
 // of what they say, not only their photo.
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, RefreshControl, FlatList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, RefreshControl, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../context/I18nContext';
@@ -10,6 +10,7 @@ import { fetchSinglesTopics, askSinglesTopic, heartSinglesTopic } from '../../se
 import { notify } from '../../utils/adminConfirm';
 import { GOLD, FACE, SinglesScreen, GoldButton, Portrait, Body, SkeletonList, Offline } from '../../components/singles/SinglesKit';
 import useSingles from '../../components/singles/useSingles';
+import { EmojiTextInput } from '../../components/EmojiKeyboard';
 
 export function TopicRow({ topic, onPress, onHeart }) {
   const { t } = useI18n();
@@ -72,7 +73,7 @@ export default function SinglesCommunity() {
         ListHeaderComponent={(
           <View style={styles.ask}>
             <Body>{t('singles.community.lead')}</Body>
-            <TextInput style={styles.input} value={text} onChangeText={setText} multiline maxLength={300}
+            <EmojiTextInput style={styles.input} value={text} onChangeText={setText} multiline maxLength={300}
               placeholder={t('singles.community.placeholder')} placeholderTextColor={GOLD.muted}
               accessibilityLabel={t('singles.community.placeholder')} testID="singles-ask-input" />
             <GoldButton label={t('singles.community.ask')} onPress={ask} busy={busy} disabled={text.trim().length < 10}

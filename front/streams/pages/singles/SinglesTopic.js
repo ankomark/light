@@ -1,6 +1,6 @@
 // One community question and its replies. Report any reply that crosses the
 // line; moderators can take it down.
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { notify, confirmAction } from '../../utils/adminConfirm';
 import { GOLD, FACE, SinglesScreen, Portrait, Body, GoldButton } from '../../components/singles/SinglesKit';
 import useSingles from '../../components/singles/useSingles';
 import { TopicRow } from './SinglesCommunity';
+import { useEmojiInput, EmojiToggle, EmojiPanel } from '../../components/EmojiKeyboard';
 
 export default function SinglesTopic() {
   const { t } = useI18n();
@@ -24,6 +25,8 @@ export default function SinglesTopic() {
   const { data: kept, setData: setTopic, failed: offline, reload } = useSingles(`topic:${params.id}`, fetchTopic);
   const topic = gone ? { failed: true } : kept;
   const [text, setText] = useState('');
+  const inputRef = useRef(null);
+  const emoji = useEmojiInput({ value: text, onChangeText: setText, maxLength: 600, inputRef });
   const [busy, setBusy] = useState(false);
 
   const send = async () => {
@@ -46,14 +49,18 @@ export default function SinglesTopic() {
   return (
     <SinglesScreen title={t('singles.community.title')} testID="singles-topic"
       footer={topic && !topic.failed ? (
+        <View>
         <View style={styles.reply}>
-          <TextInput style={styles.input} value={text} onChangeText={setText} maxLength={600} multiline
+          <EmojiToggle open={emoji.open} onPress={emoji.toggle} color={GOLD.muted} testID="singles-reply-emoji" />
+          <TextInput ref={inputRef} {...emoji.inputProps} style={styles.input} value={text} onChangeText={setText} maxLength={600} multiline
             placeholder={t('singles.community.replyPlaceholder')} placeholderTextColor={GOLD.muted}
             accessibilityLabel={t('singles.community.replyPlaceholder')} testID="singles-reply-input" />
           <TouchableOpacity style={styles.send} onPress={send} disabled={busy || !text.trim()} accessibilityRole="button"
             accessibilityLabel={t('dm.send')} testID="singles-reply-send">
             {busy ? <ActivityIndicator color={GOLD.onGold} /> : <Ionicons name="send" size={18} color={GOLD.onGold} />}
           </TouchableOpacity>
+        </View>
+        {emoji.open && <EmojiPanel onPick={emoji.insert} style={{ marginTop: 8 }} testID="singles-reply-emoji-panel" />}
         </View>
       ) : null}>
       {!topic && offline ? (

@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { spacing, radius } from '../../constants/theme';
 import { live } from '../../constants/liveTheme';
 import { useI18n } from '../../context/I18nContext';
+import { useEmojiInput, EmojiToggle, EmojiPanel } from '../EmojiKeyboard';
 
 const ChatRow = ({ item, hostLabel, onPress }) => (
   item.system ? (
@@ -54,6 +55,8 @@ const LiveChat = ({
 }) => {
   const { t } = useI18n();
   const listRef = useRef(null);
+  const inputRef = useRef(null);
+  const emoji = useEmojiInput({ value: draft, onChangeText: onChangeDraft, maxLength: 200, inputRef });
 
   useEffect(() => {
     if (messages.length) {
@@ -89,8 +92,12 @@ const LiveChat = ({
           <Text style={styles.mutedText}>{t('live.youAreMuted')}</Text>
         </View>
       ) : (
+      <>
       <View style={styles.composer}>
+        <EmojiToggle open={emoji.open} onPress={emoji.toggle} color={live.inkDim} size={22} testID="live-emoji" />
         <TextInput
+          ref={inputRef}
+          {...emoji.inputProps}
           style={styles.input}
           value={draft}
           onChangeText={onChangeDraft}
@@ -111,6 +118,8 @@ const LiveChat = ({
           </LinearGradient>
         </TouchableOpacity>
       </View>
+      {emoji.open && <EmojiPanel onPick={emoji.insert} height={210} style={styles.emojiPanel} testID="live-emoji-panel" />}
+      </>
       )}
     </View>
   );
@@ -144,6 +153,7 @@ const styles = StyleSheet.create({
   mutedBox: { paddingVertical: 10, paddingHorizontal: spacing.sm },
   mutedText: { flex: 1, fontSize: 12.5, color: live.inkDim },
   composer: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
+  emojiPanel: { marginTop: spacing.xs },
   input: {
     flex: 1, color: '#fff', fontSize: 14, backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: radius.full, paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2,

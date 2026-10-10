@@ -1,11 +1,12 @@
 // A note on a passage: the verses above, the reader's own words below.
 // Saving an empty note deletes it.
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import BottomSheet from './BottomSheet';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { EmojiTextInput } from './EmojiKeyboard';
 
 const MAX_NOTE = 2000;
 
@@ -45,7 +46,7 @@ const BibleNoteSheet = ({ visible, reference, verseText, initialNote = '', onSav
     >
       <View style={styles.body}>
         {verseText ? <Text style={styles.quote} numberOfLines={4}>{verseText}</Text> : null}
-        <TextInput
+        <EmojiTextInput
           style={styles.input}
           value={text}
           onChangeText={setText}

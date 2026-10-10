@@ -30,6 +30,7 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { useAuth } from '../context/useAuth';
+import { EmojiTextInput } from '../components/EmojiKeyboard';
 
 // `id` is the saved chapter's (none until first saved): sent back so the save
 // updates it in place — its history and readers' places kept.
@@ -918,7 +919,7 @@ const PublicationEditor = ({ route, navigation }) => {
           />
 
           <Text style={styles.label}>{t('pub.summary')}</Text>
-          <TextInput
+          <EmojiTextInput
             style={[styles.input, styles.multiline]}
             placeholder={t('pub.summaryPlaceholder')}
             placeholderTextColor={colors.placeholder}

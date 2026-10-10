@@ -52,6 +52,7 @@ import {
   TypeStep, CategoryPicker, GoalStep, DocumentStep, VisibilityStep, pickDocument,
 } from './HostSteps';
 import { ticketErrorText } from './ticketText';
+import { EmojiTextInput } from '../../components/EmojiKeyboard';
 
 // Filed under the Streams account: another on the same phone never sees it.
 const draftKey = () => `tix:hostDraft:${organiserScope() || 'none'}`;
@@ -76,10 +77,13 @@ const fieldsSignature = (d) => JSON.stringify(eventFields(d));
 
 const TILL_KIND = { active: 'paid', pending: 'pending', submitted: 'pending', rejected: 'failed' };
 
-const Input = ({ label, error, hint, style, ...props }) => (
+// Emoji in the description (multi-line), not in prices, dates or tills.
+const Input = ({ label, error, hint, style, ...props }) => {
+  const Box = props.multiline ? EmojiTextInput : TextInput;
+  return (
   <View>
     {!!label && <Text style={styles.label}>{label}</Text>}
-    <TextInput
+    <Box
       placeholderTextColor={T.faint}
       style={[styles.input, !!error && styles.inputBad, style]}
       accessibilityLabel={label}
@@ -87,7 +91,8 @@ const Input = ({ label, error, hint, style, ...props }) => (
     />
     {error ? <Text style={styles.bad}>{error}</Text> : hint ? <Text style={styles.hint}>{hint}</Text> : null}
   </View>
-);
+  );
+};
 
 const TicketCreateEvent = ({ navigation }) => {
   const { t } = useI18n();

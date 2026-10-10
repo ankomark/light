@@ -18,6 +18,7 @@ import {
   GOLD, FACE, SinglesScreen, GoldButton, Label, Chip, Body, Card, SkeletonList, useSheetPad, Offline,
 } from '../../components/singles/SinglesKit';
 import useSingles from '../../components/singles/useSingles';
+import { EmojiTextInput } from '../../components/EmojiKeyboard';
 
 export const KINDS = ['coffee', 'bible_study', 'outdoors', 'concert', 'retreat', 'seminar', 'prayer', 'online'];
 const KIND_ICON = {
@@ -157,7 +158,7 @@ function SuggestSheet({ visible, onClose, onDone }) {
             <Switch value={f.online} onValueChange={set('online')} trackColor={{ true: GOLD.gold, false: GOLD.border }} thumbColor="#FFFFFF" />
           </View>
           <Label>{t('singles.events.fieldAbout')}</Label>
-          <TextInput style={[styles.input, { minHeight: 80 }]} value={f.description} onChangeText={set('description')} multiline maxLength={1500}
+          <EmojiTextInput style={[styles.input, { minHeight: 80 }]} value={f.description} onChangeText={set('description')} multiline maxLength={1500}
             accessibilityLabel={t('singles.events.fieldAbout')} />
           <View style={styles.row}>
             <GoldButton label={t('common.cancel')} kind="outline" onPress={onClose} />

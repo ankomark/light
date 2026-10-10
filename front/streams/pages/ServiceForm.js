@@ -24,6 +24,7 @@ import {
 import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { EmojiTextInput } from '../components/EmojiKeyboard';
 
 const GALLERY_MAX = 20;
 const CAPTION_MAX = 80;
@@ -57,10 +58,13 @@ const fromService = (s) => ({
   currency: s.currency || 'KES',
 });
 
-const Field = ({ label, value, onChange, placeholder, multiline, keyboardType, testID }) => (
+// Emoji in the descriptions (multi-line), not in names, numbers or links.
+const Field = ({ label, value, onChange, placeholder, multiline, keyboardType, testID }) => {
+  const Box = multiline ? EmojiTextInput : TextInput;
+  return (
   <>
     {label ? <Text style={styles.label}>{label}</Text> : null}
-    <TextInput
+    <Box
       style={[styles.input, multiline && styles.multiline, !label && { marginTop: spacing.sm }]}
       value={value}
       onChangeText={onChange}
@@ -73,7 +77,8 @@ const Field = ({ label, value, onChange, placeholder, multiline, keyboardType, t
       testID={testID}
     />
   </>
-);
+  );
+};
 
 const ServiceForm = ({ route, navigation }) => {
   const { t, resolvedLanguage } = useI18n();

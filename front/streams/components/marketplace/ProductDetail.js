@@ -16,8 +16,7 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
-  TextInput,
-} from 'react-native';
+  } from 'react-native';
 import KeyboardLift from '../tickets/KeyboardLift';
 import { Image } from 'expo-image';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -43,6 +42,7 @@ import useMarketToast from './MarketToast';
 import CartButton from './CartButton';
 import ShareCardSheet from '../ShareCardSheet';
 import ProductShareCard from './ProductShareCard';
+import { EmojiTextInput } from '../EmojiKeyboard';
 
 const PLACEHOLDER_IMAGE = require('../../assets/default-image.png');
 
@@ -720,7 +720,7 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
                 </TouchableOpacity>
               ))}
             </View>
-            <TextInput
+            <EmojiTextInput
               style={styles.reviewInput}
               placeholder={t('market.product.commentPlaceholder')}
               placeholderTextColor="#888"

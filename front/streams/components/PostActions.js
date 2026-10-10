@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, StyleSheet, Modal, TextInput, Alert, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet, Modal, Alert, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import KeyboardLift from './tickets/KeyboardLift';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import ReportModal from './ReportModal';
 import { emit, EVENTS } from '../utils/appEvents';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { EmojiTextInput } from './EmojiKeyboard';
 
 const PostActions = ({ post, onUpdate, onDelete, onNotInterested, variant }) => {
   const { t } = useI18n();
@@ -222,7 +223,7 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, variant }) => 
 
             <Text style={styles.modalTitle}>{t('post.editTitle')}</Text>
 
-            <TextInput
+            <EmojiTextInput
               style={styles.editInput}
               value={editedCaption}
               onChangeText={setEditedCaption}

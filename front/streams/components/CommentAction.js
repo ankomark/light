@@ -12,7 +12,7 @@
 // behind the scenes; a failure rolls back and says so.
 import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
-  View, Text, TouchableOpacity, TextInput, StyleSheet, FlatList, Alert, Pressable,
+  View, Text, TouchableOpacity, TextInput, StyleSheet, FlatList, Alert, Pressable, Keyboard,
 } from 'react-native';
 // expo-image: commenters' faces repeat across posts; the shared memory+disk
 // cache paints them instantly instead of re-downloading per sheet.
@@ -34,6 +34,7 @@ import ReportModal from './ReportModal';
 import formatCount from '../utils/formatCount';
 import { colors, radius, spacing, typography, shadows } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import { EmojiToggle, EmojiPanel } from './EmojiKeyboard';
 
 const DEFAULT_AVATAR = require('../assets/avatar-placeholder.jpg');
 const QUICK_EMOJIS = ['❤️', '😂', '🔥', '👏', '😍', '🙏', '😮', '🙌'];
@@ -333,6 +334,17 @@ const CommentAction = ({
     setSelection({ start: next.cursor, end: next.cursor });
     setCaret(next.cursor);
   };
+  // The full emoji panel, in the keyboard's place (the quick row stays).
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const toggleEmoji = () => {
+    if (emojiOpen) {
+      setEmojiOpen(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } else {
+      Keyboard.dismiss();
+      setEmojiOpen(true);
+    }
+  };
   const insertEmoji = (emoji) => {
     const at = selection.end ?? text.length;
     applyText({ text: text.slice(0, at) + emoji + text.slice(at), cursor: at + emoji.length });
@@ -621,6 +633,7 @@ const CommentAction = ({
                       <Text style={styles.emoji}>{e}</Text>
                     </TouchableOpacity>
                   ))}
+                  <EmojiToggle open={emojiOpen} onPress={toggleEmoji} color={colors.textSecondary} size={22} testID="comment-emoji" />
                 </View>
                 <View style={styles.inputContainer}>
                   <Image
@@ -640,6 +653,7 @@ const CommentAction = ({
                     value={text}
                     onChangeText={setText}
                     onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
+                    onFocus={() => setEmojiOpen(false)}
                     selection={forcedSelection}
                     multiline
                     maxLength={2200}
@@ -656,6 +670,7 @@ const CommentAction = ({
                     <Feather name="send" size={19} color={colors.white} />
                   </TouchableOpacity>
                 </View>
+                {emojiOpen && <EmojiPanel onPick={insertEmoji} style={styles.emojiPanel} testID="comment-emoji-panel" />}
               </View>
             )}
       </BottomSheet>
@@ -670,6 +685,7 @@ const CommentAction = ({
 };
 
 const styles = StyleSheet.create({
+  emojiPanel: { marginHorizontal: spacing.sm, marginBottom: spacing.sm },
   railButton: { alignItems: 'center', justifyContent: 'center', minWidth: 56, gap: 2 },
   railIcon: { textShadowColor: 'rgba(0,0,0,0.55)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
   railText: {

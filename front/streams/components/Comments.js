@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import useKeyboardHeight from '../hooks/useKeyboardHeight';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchComments, postComment, getAccessToken } from '../services/api';
+import { useEmojiInput, EmojiToggle, EmojiPanel } from './EmojiKeyboard';
 import { useAuth } from '../context/useAuth';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
@@ -52,6 +53,8 @@ const Comments = ({ trackId, initialCount = 0, highlightCommentId, autoOpen = fa
     // count shown on the closed button and the stale-while-revalidate reopen.
     const [fetched, setFetched] = useState(false);
     const [newComment, setNewComment] = useState('');
+    const commentInputRef = useRef(null);
+    const emoji = useEmojiInput({ value: newComment, onChangeText: setNewComment, inputRef: commentInputRef });
     const [showComments, setShowComments] = useState(autoOpen);
     const { currentUser } = useAuth();
 
@@ -262,7 +265,10 @@ const Comments = ({ trackId, initialCount = 0, highlightCommentId, autoOpen = fa
                                 contentFit="cover"
                                 style={styles.userAvatar}
                             />
+                            <EmojiToggle open={emoji.open} onPress={emoji.toggle} color={colors.textSecondary} testID="comments-emoji" />
                             <TextInput
+                                ref={commentInputRef}
+                                {...emoji.inputProps}
                                 style={styles.input}
                                 value={newComment}
                                 onChangeText={setNewComment}
@@ -280,6 +286,7 @@ const Comments = ({ trackId, initialCount = 0, highlightCommentId, autoOpen = fa
                                 <Feather name="send" size={20} color={colors.white} />
                             </TouchableOpacity>
                         </View>
+                        {emoji.open && <EmojiPanel onPick={emoji.insert} style={{ marginHorizontal: 10, marginBottom: 8 }} testID="comments-emoji-panel" />}
                     </SafeAreaView>
                 </View>
             </Modal>
