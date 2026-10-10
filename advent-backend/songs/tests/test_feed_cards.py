@@ -148,3 +148,27 @@ class SpacingTests(TestCase):
 
     def test_cards_that_cannot_fit_wait(self):
         self.assertEqual(space_cards([1, 2, 3], {1, 2, 3}), [1])
+
+
+@override_settings(R2_PUBLIC_BASE=R2)
+class GridTests(APITestCase):
+    def test_a_sellers_grid_shows_product_cards_cheaply_and_drops_sold_out_ones(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from songs.models import ProductCategory, ProductImage
+        seller = User.objects.create_user('grid', 'g@x.com', 'x')
+        cat = ProductCategory.objects.create(name='Books')
+        for i in range(6):
+            p = Product.objects.create(seller=seller, title=f'P{i}', description='d', price=10, category=cat,
+                                       slug=f'p-{i}')
+            ProductImage.objects.create(product=p, image=f'{R2}/products/{i}.jpg')
+            SocialPost.objects.create(user=seller, content_type='product', product=p)
+        Product.objects.filter(slug='p-0').update(is_available=False)
+        self.client.force_authenticate(seller)
+        with CaptureQueriesContext(connection) as q:
+            res = self.client.get(f'/api/users/{seller.id}/')
+        self.assertEqual(res.status_code, 200, res.content[:200])
+        posts = res.data['social_posts']
+        self.assertEqual(len(posts), 5)
+        self.assertTrue(all(p['thumbnail_url'].startswith(R2) for p in posts))
+        self.assertLess(len(q.captured_queries), 40)

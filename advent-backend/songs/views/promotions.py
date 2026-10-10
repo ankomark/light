@@ -55,6 +55,7 @@ class Promotions(APIView):
     throttle_scope = 'promotion'
 
     def get(self, request):
+        promo.reconcile_payments(owner=request.user, limit=3)
         rows = Promotion.objects.filter(owner=request.user).exclude(status=Promotion.CANCELLED).select_related(
             'package', 'owner', 'post', 'product', 'publication', 'service')[:100]
         return Response([promo.summary(p) for p in rows])
@@ -110,7 +111,7 @@ class PromotionServe(APIView):
             n = int(request.query_params.get('n', 2))
         except (TypeError, ValueError):
             n = 2
-        return Response(promo.serve(request.user, n))
+        return Response(promo.serve(request.user, n, request))
 
 
 class PromotionSeen(APIView):
@@ -137,6 +138,7 @@ class AdminPromotions(APIView):
     permission_classes = [Cap('manage_promotions')]
 
     def get(self, request):
+        promo.reconcile_payments(limit=5)   # the rest by cron (finish_promotions)
         rows = Promotion.objects.exclude(status__in=(Promotion.UNPAID, Promotion.CANCELLED)).select_related(
             'package', 'owner', 'post', 'product', 'publication', 'service')
         wanted = request.query_params.get('status')

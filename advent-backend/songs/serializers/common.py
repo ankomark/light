@@ -339,6 +339,7 @@ class UserSerializer(serializers.ModelSerializer):
         # posts for the author alone.
         from songs.models import visible_posts_q
         posts = posts.filter(visible_posts_q(viewer))
+        posts = grid_posts(posts)
 
         if self.context.get('request'):
             content_type = self.context['request'].GET.get('content_type')
@@ -414,6 +415,16 @@ class PublicProfileSerializer(serializers.ModelSerializer):
 
 # A profile's grid: pinned posts first (the latest pin on top), then newest.
 PROFILE_GRID_ORDER = (models.F('pinned_at').desc(nulls_last=True), '-created_at')
+
+
+def grid_posts(qs):
+    """A profile grid's posts, card posts included properly: a product /
+    service card goes with its thing (sold out or taken down: gone, as from
+    the feed — it would open to "not found"), and its picture is fetched for
+    the whole page at once rather than two queries per tile."""
+    return (qs.exclude(product__is_removed=True).exclude(product__is_available=False)
+            .exclude(service__is_removed=True)
+            .select_related('product', 'service').prefetch_related('product__images'))
 
 
 class ProfileDetailSerializer(serializers.ModelSerializer):
@@ -507,8 +518,8 @@ class ProfileDetailSerializer(serializers.ModelSerializer):
 
     def _visible_posts(self, obj):
         from songs.models import visible_posts_q
-        return (obj.social_posts.filter(is_removed=False)
-                .filter(visible_posts_q(self._viewer())).order_by(*PROFILE_GRID_ORDER))
+        return grid_posts(obj.social_posts.filter(is_removed=False)
+                          .filter(visible_posts_q(self._viewer())).order_by(*PROFILE_GRID_ORDER))
 
     def get_posts_count(self, obj):
         # The count stays visible on a private account (as on other networks);

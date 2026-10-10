@@ -1687,7 +1687,7 @@ const SocialFeed = ({ showBackground = true }) => {
             <View style={{ height: topBarH }} />
             <StoriesBar navigation={navigation} refreshSignal={storiesRefresh} />
             {/* The verse of the day, pinned above the posts (not in search). */}
-            {!searchQuery ? <FeedVerseCard width={cardW} /> : null}
+            {!searchQuery ? <FeedVerseCard width={cardW} refreshSignal={storiesRefresh} /> : null}
             {/* Offline, or a load failed, with posts still on screen: say so
                 quietly instead of a popup. (Nothing on screen: the empty
                 state below has its own Retry.) */}

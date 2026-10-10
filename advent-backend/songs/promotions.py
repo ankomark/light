@@ -150,6 +150,18 @@ def check_payment(promotion):
     return _apply_payment(promotion, answer)
 
 
+def reconcile_payments(owner=None, older_than=timedelta(seconds=30), limit=20):
+    """Promotions still waiting on M-Pesa that nobody is watching (the app
+    was closed while paying): ask how the payment stands. Without this a paid
+    one stays 'paying' and never reaches the admins. Run on the owner's list,
+    the admins' queue and by cron."""
+    rows = Promotion.objects.filter(status=Promotion.PAYING, updated_at__lte=timezone.now() - older_than)
+    if owner is not None:
+        rows = rows.filter(owner=owner)
+    for p in rows.select_related('owner')[:limit]:
+        check_payment(p)
+
+
 def _apply_payment(promotion, answer):
     state = (answer or {}).get('status')
     if state == 'paid':
@@ -274,7 +286,7 @@ def _behind(p, now):
     return p.views / max(1, p.views_target) - elapsed
 
 
-def serve(viewer, count=2):
+def serve(viewer, count=2, request=None):
     """Up to `count` promotions for `viewer` to see now, as the app draws them."""
     from .models import blocked_ids_for
     now = timezone.now()
@@ -293,10 +305,10 @@ def serve(viewer, count=2):
         candidates = candidates.exclude(owner_id__in=blocked)
     chosen = [p for p in candidates if _matches(p, location) and _still_showable(p)]
     chosen.sort(key=lambda p: _behind(p, now))
-    return [item(p, viewer) for p in chosen[:max(0, min(int(count), 4))]]
+    return [item(p, viewer, request) for p in chosen[:max(0, min(int(count), 4))]]
 
 
-def item(promotion, viewer):
+def item(promotion, viewer, request=None):
     """A promotion as the feed draws it: what it is, marked as sponsored."""
     from .serializers.social import SocialPostSerializer, product_card, service_card
     from .views.social import feed_post_queryset
@@ -304,7 +316,8 @@ def item(promotion, viewer):
     out = {'promotion_id': p.pk, 'kind': p.kind, 'owner': {'id': p.owner_id, 'username': p.owner.username}}
     if p.kind == Promotion.KIND_POST:
         row = feed_post_queryset(viewer).filter(pk=p.post_id).first()
-        out['post'] = SocialPostSerializer(row, context={'request': SimpleNamespace(user=viewer)}).data if row else None
+        ctx = {'request': request or SimpleNamespace(user=viewer)}
+        out['post'] = SocialPostSerializer(row, context=ctx).data if row else None
     elif p.kind == Promotion.KIND_PRODUCT:
         out['product'] = product_card(SimpleNamespace(content_type='product', product_id=p.product_id, product=p.product))
     elif p.kind == Promotion.KIND_SERVICE:
@@ -348,7 +361,11 @@ def tapped(promotion, viewer, action='open'):
     if promotion.owner_id == viewer.pk:
         return
     if action == 'follow':
-        Promotion.objects.filter(pk=promotion.pk).update(follows=F('follows') + 1)
+        # Once per person: following and unfollowing from the card again and
+        # again must not inflate what the owner sees.
+        from django.core.cache import cache
+        if cache.add(f'promo:follow:{promotion.pk}:{viewer.pk}', 1, 60 * 60 * 24 * 60):
+            Promotion.objects.filter(pk=promotion.pk).update(follows=F('follows') + 1)
         return
     moved = PromotionView.objects.filter(promotion=promotion, user=viewer, day=timezone.localdate(),
                                          clicked=False).update(clicked=True)

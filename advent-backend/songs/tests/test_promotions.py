@@ -191,3 +191,45 @@ class PromotionTests(APITestCase):
                                            format='json').status_code, 400)
         res = self.client.patch('/api/admin/promotion-packages/starter/', {'price': 250}, format='json')
         self.assertEqual(res.data['price'], 250)
+
+    def test_paid_while_the_app_was_closed_still_reaches_the_admins(self):
+        pid = self.buy().data['id']
+        with mock.patch('songs.ticketing_staff.call', side_effect=ticketing('pending')):
+            self.client.post(f'/api/promotions/{pid}/pay/', {'phone': '0712345678'}, format='json')
+        Promotion.objects.filter(pk=pid).update(updated_at=timezone.now() - timedelta(minutes=2))
+        # Nobody opens the promotion again; the admins open their queue.
+        self.client.force_authenticate(self.admin)
+        with mock.patch('songs.ticketing_staff.call', side_effect=ticketing('paid')):
+            queue = self.client.get('/api/admin/promotions/?status=review').data
+        self.assertEqual([p['id'] for p in queue], [pid])
+
+    def test_the_owners_list_catches_up_too(self):
+        pid = self.buy().data['id']
+        with mock.patch('songs.ticketing_staff.call', side_effect=ticketing('pending')):
+            self.client.post(f'/api/promotions/{pid}/pay/', {'phone': '0712345678'}, format='json')
+        Promotion.objects.filter(pk=pid).update(updated_at=timezone.now() - timedelta(minutes=2))
+        with mock.patch('songs.ticketing_staff.call', side_effect=ticketing('paid')):
+            rows = self.client.get('/api/promotions/').data
+        self.assertEqual(rows[0]['status'], 'review')
+
+    def test_following_from_a_promotion_counts_once(self):
+        from django.core.cache import cache
+        cache.clear()
+        p = self.paid_and_live()
+        self.client.force_authenticate(self.viewer)
+        for _ in range(3):
+            self.client.post(f'/api/promotions/{p.pk}/tap/', {'action': 'follow'}, format='json')
+        p.refresh_from_db()
+        self.assertEqual(p.follows, 1)
+
+
+class TicketingAddressTests(APITestCase):
+    def test_an_empty_setting_means_the_default(self):
+        import importlib
+        import os
+        from unittest import mock as m
+        with m.patch.dict(os.environ, {'TICKETING_API_URL': ''}):
+            import music.settings as s
+            importlib.reload(s)
+            self.assertEqual(s.TICKETING_API_URL, 'https://tickets.smartbillsolution.com')
+        importlib.reload(s)

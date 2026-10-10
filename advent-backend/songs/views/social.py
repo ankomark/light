@@ -1233,11 +1233,14 @@ class ExploreViewSet(viewsets.ViewSet):
         # since is dropped here, with every post's own visibility.
         candidates = (SocialPost.objects.filter(id__in=ranked, is_removed=False).filter(visible_posts_q(request.user))
                       .exclude(user_id__in=hidden_authors).exclude(id__in=not_interested)
+                      .exclude(product__is_removed=True).exclude(product__is_available=False)
+                      .exclude(service__is_removed=True)
                       .values_list('id', flat=True))
         allowed = set(candidates)
         ordered = [pid for pid in ranked if pid in allowed]
         page_ids = ordered[(page - 1) * EXPLORE_PAGE: page * EXPLORE_PAGE]
-        by_id = {p.id: p for p in SocialPost.objects.filter(id__in=page_ids)}
+        by_id = {p.id: p for p in SocialPost.objects.filter(id__in=page_ids)
+                 .select_related('product', 'service').prefetch_related('product__images')}
         rows = [by_id[i] for i in page_ids if i in by_id]
         return Response(ExplorePostSerializer(rows, many=True, context={'request': request}).data)
 

@@ -24,14 +24,16 @@ const today = () => todayIso();
 
 export const _resetFeedVerse = () => { kept = null; };   // tests
 
-const FeedVerseCard = ({ width }) => {
+const FeedVerseCard = ({ width, refreshSignal }) => {
   const { t } = useI18n();
   const navigation = useNavigation();
   const [verse, setVerse] = useState(() => (kept && kept.day === today() ? kept.verse : null));
   const [sharing, setSharing] = useState(false);
 
+  // Fetched when missing, when the day has turned (midnight Nairobi), and on
+  // the feed's pull-to-refresh — so an offline start isn't verse-less all day.
   useEffect(() => {
-    if (verse) return undefined;
+    if (verse && kept?.day === today()) return undefined;
     let live = true;
     fetchDailyVerse(null, { via: 'feed' })
       .then((v) => {
@@ -41,7 +43,7 @@ const FeedVerseCard = ({ width }) => {
       })
       .catch(() => {});
     return () => { live = false; };
-  }, [verse]);
+  }, [verse, refreshSignal]);
 
   const read = useCallback(() => navigation.navigate('DailyVerse'), [navigation]);
 

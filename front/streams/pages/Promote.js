@@ -40,6 +40,8 @@ const Promote = ({ navigation, route }) => {
   const [promotion, setPromotion] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // No answer from M-Pesa in the waiting time: say so, and offer another prompt.
+  const [timedOut, setTimedOut] = useState(false);
   const pollStarted = useRef(0);
 
   useEffect(() => {
@@ -64,7 +66,7 @@ const Promote = ({ navigation, route }) => {
     if (!waiting || !promotion?.id) return undefined;
     pollStarted.current = pollStarted.current || Date.now();
     const id = setInterval(async () => {
-      if (Date.now() - pollStarted.current > POLL_FOR_MS) { clearInterval(id); return; }
+      if (Date.now() - pollStarted.current > POLL_FOR_MS) { clearInterval(id); setTimedOut(true); return; }
       try { setPromotion(await fetchPromotion(promotion.id)); } catch { /* next tick */ }
     }, POLL_MS);
     return () => clearInterval(id);
@@ -92,6 +94,7 @@ const Promote = ({ navigation, route }) => {
         setPromotion(p);
       }
       pollStarted.current = Date.now();
+      setTimedOut(false);
       setPromotion(await payPromotion(p.id, phone.trim()));
     } catch (e) {
       setError(errorText(e, t));
@@ -100,7 +103,9 @@ const Promote = ({ navigation, route }) => {
     }
   }, [phone, everyone, counties, promotion, kind, params.targetId, pkg, t]);
 
-  const locked = !!promotion && promotion.status !== 'unpaid';   // what was bought can't change now
+  // Once made, its package and audience are what the server holds (and what
+  // the price is for): shown, not changeable. To change them, cancel it.
+  const locked = !!promotion;
 
   let body;
   if (status === 'review' || status === 'active' || status === 'done') {
@@ -112,6 +117,21 @@ const Promote = ({ navigation, route }) => {
         <TouchableOpacity style={styles.primary} onPress={() => (navigation.replace ? navigation.replace('MyPromotions') : navigation.navigate('MyPromotions'))}
                           accessibilityRole="button" testID="promote-mine">
           <Text style={styles.primaryText}>{t('promote.seeMine')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  } else if (waiting && timedOut) {
+    body = (
+      <View style={styles.result} testID="promote-timed-out">
+        <Ionicons name="time-outline" size={52} color={colors.textSecondary} />
+        <Text style={styles.resultTitle}>{t('promote.noAnswer')}</Text>
+        <Text style={styles.resultText}>{t('promote.noAnswerBody')}</Text>
+        <TouchableOpacity style={styles.primary} onPress={pay} disabled={busy} accessibilityRole="button"
+                          testID="promote-retry">
+          {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryText}>{t('promote.sendAgain')}</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('MyPromotions')} accessibilityRole="button">
+          <Text style={styles.link}>{t('promote.seeMine')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -269,6 +289,7 @@ const styles = StyleSheet.create({
   result: { alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xl },
   resultTitle: { color: colors.textPrimary, fontSize: 20, fontWeight: '800', textAlign: 'center' },
   resultText: { color: colors.textSecondary, fontSize: 15, lineHeight: 22, textAlign: 'center' },
+  link: { color: colors.primary, fontSize: 15, fontWeight: '700', padding: spacing.sm },
   error: { color: '#FF8A80', fontSize: 13.5, marginTop: spacing.sm, textAlign: 'center' },
 });
 

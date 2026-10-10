@@ -382,9 +382,9 @@ class UserViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
         denied = self._require_can_view(user)
         if denied:
             return denied
-        from ..serializers.common import PROFILE_GRID_ORDER
-        posts = (SocialPost.objects.filter(user=user, is_removed=False)
-                 .filter(visible_posts_q(request.user)).order_by(*PROFILE_GRID_ORDER))
+        from ..serializers.common import PROFILE_GRID_ORDER, grid_posts
+        posts = grid_posts(SocialPost.objects.filter(user=user, is_removed=False)
+                           .filter(visible_posts_q(request.user)).order_by(*PROFILE_GRID_ORDER))
         content_type = request.query_params.get('content_type')
         if content_type in ('image', 'video'):
             posts = posts.filter(content_type=content_type)

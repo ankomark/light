@@ -620,5 +620,6 @@ LOGGING = {
 # Authorization header, and the acting admin's name for its audit log. The
 # same value is STAFF_SERVICE_KEY in the ticketing server's .env; rotate both
 # together. Unset, the admin Tickets screens say so instead of failing.
-TICKETING_API_URL = os.getenv('TICKETING_API_URL', 'https://tickets.smartbillsolution.com').rstrip('/')
+# `or`: a line left empty in .env (TICKETING_API_URL=) means the default, not "".
+TICKETING_API_URL = (os.getenv('TICKETING_API_URL') or 'https://tickets.smartbillsolution.com').rstrip('/')
 TICKETING_SERVICE_KEY = os.getenv('TICKETING_SERVICE_KEY', '')
