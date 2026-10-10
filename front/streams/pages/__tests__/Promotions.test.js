@@ -77,6 +77,26 @@ test('buying: pick a package and counties, pay, wait for the PIN, then paid', as
   await waitFor(() => expect(screen.getByTestId('promote-paid')).toBeTruthy());
 });
 
+test('no answer from M-Pesa: send again, and the waiting starts over', async () => {
+  mockApi.fetchPromotionPackages.mockResolvedValue(CATALOG);
+  mockApi.fetchPromotion.mockResolvedValue(promotion({ status: 'paying', payment_phone: '0712345678' }));
+  mockApi.payPromotion.mockResolvedValue(promotion({ status: 'paying' }));
+  jest.useFakeTimers();
+  const screen = render(<Promote navigation={nav()} route={{ params: { promotionId: 9 } }} />);
+  await act(async () => { await Promise.resolve(); });
+  await act(async () => { jest.advanceTimersByTime(156000); });
+  expect(screen.getByTestId('promote-timed-out')).toBeTruthy();
+  // Sent again with the number it was paid from (the form isn't on screen).
+  await act(async () => { fireEvent.press(screen.getByTestId('promote-retry')); });
+  expect(mockApi.payPromotion).toHaveBeenCalledWith(9, '0712345678');
+  expect(screen.getByTestId('promote-waiting')).toBeTruthy();
+  // ...and it is watched again: M-Pesa answers, the screen moves on.
+  mockApi.fetchPromotion.mockResolvedValue(promotion({ status: 'review' }));
+  await act(async () => { jest.advanceTimersByTime(3100); });
+  jest.useRealTimers();
+  await waitFor(() => expect(screen.getByTestId('promote-paid')).toBeTruthy());
+});
+
 test('a refused payment says why and stays payable', async () => {
   mockApi.fetchPromotionPackages.mockResolvedValue(CATALOG);
   mockApi.createPromotion.mockResolvedValue(promotion());
@@ -120,6 +140,16 @@ describe('in the feed', () => {
     expect(out[14]).toMatchObject({ id: 'sp-6' });
     expect(out.filter((p) => p.id === 10)).toHaveLength(1);
     expect(out).toHaveLength(21);   // 20 posts - the copy + 2 promotions
+  });
+
+  test('a short feed never loses a promoted post', () => {
+    const few = posts.slice(0, 2);
+    const out = withSponsored(few, [{ promotion_id: 5, kind: 'post', post: { id: 2, user: { id: 2 } } }]);
+    expect(out.map((p) => p.id)).toEqual([1, 2]);
+  });
+
+  test('nothing to draw, nothing placed', () => {
+    expect(withSponsored(posts, [{ promotion_id: 7, kind: 'post', post: null }])).toBe(posts);
   });
 
   test('none, or too few posts: as it was', () => {

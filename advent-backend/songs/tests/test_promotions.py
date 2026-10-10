@@ -26,6 +26,8 @@ def ticketing(status_='pending', **extra):
 @override_settings(TICKETING_SERVICE_KEY=KEY, TICKETING_API_URL='https://tickets.test')
 class PromotionTests(APITestCase):
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         self.owner = User.objects.create_user('owner', 'o@x.com', 'x')
         self.viewer = User.objects.create_user('viewer', 'v@x.com', 'x')
         self.admin = User.objects.create_user('boss', 'b@x.com', 'x')
@@ -136,6 +138,7 @@ class PromotionTests(APITestCase):
     def test_a_view_counts_once_a_day_and_never_the_owners_own(self):
         p = self.paid_and_live()
         self.client.force_authenticate(self.viewer)
+        self.client.get('/api/promotions/serve/')          # shown to them first
         self.assertTrue(self.client.post(f'/api/promotions/{p.pk}/seen/').data['counted'])
         self.assertFalse(self.client.post(f'/api/promotions/{p.pk}/seen/').data['counted'])
         self.client.post(f'/api/promotions/{p.pk}/tap/', {'action': 'open'}, format='json')
@@ -163,6 +166,7 @@ class PromotionTests(APITestCase):
     def test_done_when_delivered_or_due_with_the_shortfall_owed(self):
         p = self.paid_and_live()
         Promotion.objects.filter(pk=p.pk).update(views=2999)
+        promo.serve(self.viewer)
         with mock.patch('songs.push.notify_user'):
             promo.seen(p, self.viewer)
         p.refresh_from_db()
@@ -221,6 +225,50 @@ class PromotionTests(APITestCase):
             self.client.post(f'/api/promotions/{p.pk}/tap/', {'action': 'follow'}, format='json')
         p.refresh_from_db()
         self.assertEqual(p.follows, 1)
+
+    def test_views_count_only_for_promotions_actually_shown(self):
+        p = self.paid_and_live()
+        self.client.force_authenticate(self.viewer)
+        self.assertFalse(self.client.post(f'/api/promotions/{p.pk}/seen/').data['counted'])   # never served
+        p.refresh_from_db()
+        self.assertEqual(p.views, 0)
+
+    def test_a_lost_answer_keeps_the_reference_for_the_next_try(self):
+        from songs import ticketing_staff
+        pid = self.buy().data['id']
+        with mock.patch('songs.ticketing_staff.call', side_effect=ticketing_staff.TicketingUnavailable('timeout')):
+            self.client.post(f'/api/promotions/{pid}/pay/', {'phone': '0712345678'}, format='json')
+        first = Promotion.objects.get(pk=pid).payment_reference
+        self.assertTrue(first)
+        with mock.patch('songs.ticketing_staff.call', side_effect=ticketing('pending')) as call:
+            self.client.post(f'/api/promotions/{pid}/pay/', {'phone': '0712345678'}, format='json')
+        self.assertEqual(call.call_args.kwargs['body']['reference'], first)
+
+    def test_deleting_the_post_keeps_the_record_of_the_payment(self):
+        p = self.paid_and_live()
+        self.post.delete()
+        p.refresh_from_db()
+        self.assertEqual((p.status, p.post_id, p.mpesa_receipt), ('active', None, 'TJK1'))
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self.client.get('/api/promotions/serve/').data, [])
+
+    def test_nothing_to_approve_once_its_thing_is_gone(self):
+        pid = self.buy().data['id']
+        with mock.patch('songs.ticketing_staff.call', side_effect=ticketing('paid')):
+            self.client.post(f'/api/promotions/{pid}/pay/', {'phone': '0712345678'}, format='json')
+        SocialPost.objects.filter(pk=self.post.pk).update(is_removed=True)
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(f'/api/admin/promotions/{pid}/approve/')
+        self.assertEqual(res.data['code'], 'gone')
+
+    def test_a_promoted_post_the_viewer_cannot_see_is_not_served(self):
+        p = self.paid_and_live()
+        from songs.models import Block
+        Block.objects.create(blocker=self.owner, blocked=self.viewer)
+        self.client.force_authenticate(self.viewer)
+        self.assertEqual(self.client.get('/api/promotions/serve/').data, [])
+        p.refresh_from_db()
+        self.assertEqual(p.views, 0)
 
 
 class TicketingAddressTests(APITestCase):

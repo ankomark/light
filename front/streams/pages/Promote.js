@@ -43,6 +43,9 @@ const Promote = ({ navigation, route }) => {
   // No answer from M-Pesa in the waiting time: say so, and offer another prompt.
   const [timedOut, setTimedOut] = useState(false);
   const pollStarted = useRef(0);
+  // Bumped by every prompt sent: a second prompt (after "no answer") starts
+  // the waiting again, though the promotion itself hasn't changed.
+  const [pollRound, setPollRound] = useState(0);
 
   useEffect(() => {
     fetchPromotionPackages().then(setCatalog).catch(() => setError(t('promote.loadFailed')));
@@ -52,6 +55,9 @@ const Promote = ({ navigation, route }) => {
         setPkg(p.package?.key || 'standard');
         setEveryone(!p.counties?.length);
         setCounties(p.counties || []);
+        // The number it was paid from: "send again" needs it, and the form
+        // isn't on screen while it waits.
+        if (p.payment_phone) setPhone((cur) => cur || p.payment_phone);
       }).catch(() => {});
     }
   }, [params.promotionId, t]);
@@ -70,7 +76,7 @@ const Promote = ({ navigation, route }) => {
       try { setPromotion(await fetchPromotion(promotion.id)); } catch { /* next tick */ }
     }, POLL_MS);
     return () => clearInterval(id);
-  }, [waiting, promotion?.id]);
+  }, [waiting, promotion?.id, pollRound]);
 
   const shownCounties = useMemo(() => {
     const all = catalog?.counties || [];
@@ -93,9 +99,11 @@ const Promote = ({ navigation, route }) => {
         });
         setPromotion(p);
       }
+      const paying = await payPromotion(p.id, phone.trim());
       pollStarted.current = Date.now();
       setTimedOut(false);
-      setPromotion(await payPromotion(p.id, phone.trim()));
+      setPollRound((n) => n + 1);
+      setPromotion(paying);
     } catch (e) {
       setError(errorText(e, t));
     } finally {

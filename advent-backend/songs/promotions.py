@@ -119,7 +119,11 @@ def pay(promotion, phone):
     if promotion.status not in (Promotion.UNPAID, Promotion.PAYING):
         raise Refused('paid', 'This promotion has been paid for.')
     if not promotion.payment_reference:
+        # Kept before the prompt is asked for: if the answer is lost on the
+        # way back (the prompt went, the network didn't), the next try reuses
+        # this reference, so a payment made to that prompt is still ours.
         promotion.payment_reference = f'PROMO{promotion.pk}X{secrets.token_hex(3)}'
+        promotion.save(update_fields=['payment_reference', 'updated_at'])
     try:
         answer = ticketing_staff.call(promotion.owner, 'post', 'payments/', body={
             'reference': promotion.payment_reference, 'amount': promotion.price, 'phone': phone,
@@ -201,6 +205,8 @@ def _tell(promotion, message):
 def approve(promotion, admin):
     if promotion.status != Promotion.REVIEW:
         raise Refused('state', 'Only a paid promotion waiting for review can be approved.')
+    if not _still_showable(promotion):
+        raise Refused('gone', 'What it promotes is gone or hidden now. Decline it so it is refunded.')
     now = timezone.now()
     promotion.status = Promotion.ACTIVE
     promotion.reviewed_by, promotion.reviewed_at = admin, now
@@ -266,7 +272,7 @@ def _matches(promotion, location):
 
 
 def _still_showable(p):
-    if p.owner.is_deactivated:
+    if p.owner.is_deactivated or not p.owner.is_active:      # closed or banned
         return False
     if p.kind == Promotion.KIND_POST:
         return bool(p.post) and not p.post.is_removed and p.post.visibility == SocialPost.VISIBILITY_PUBLIC
@@ -305,7 +311,26 @@ def serve(viewer, count=2, request=None):
         candidates = candidates.exclude(owner_id__in=blocked)
     chosen = [p for p in candidates if _matches(p, location) and _still_showable(p)]
     chosen.sort(key=lambda p: _behind(p, now))
-    return [item(p, viewer, request) for p in chosen[:max(0, min(int(count), 4))]]
+    from django.core.cache import cache
+    out = []
+    for p in chosen:
+        if len(out) >= max(0, min(int(count), 4)):
+            break
+        row = item(p, viewer, request)
+        if p.kind == Promotion.KIND_POST and not row.get('post'):
+            continue                 # a post this viewer may not see: not theirs to be shown
+        # Only what was served can be counted as seen (seen()), so views can't
+        # be reported for promotions nobody was shown.
+        cache.set(_served_key(p.pk, viewer.pk), 1, SERVED_TTL)
+        out.append(row)
+    return out
+
+
+SERVED_TTL = 60 * 60 * 6     # a feed left open a while still counts
+
+
+def _served_key(promotion_id, user_id):
+    return f'promo:served:{promotion_id}:{user_id}'
 
 
 def item(promotion, viewer, request=None):
@@ -344,6 +369,9 @@ def seen(promotion, viewer):
     """The app showed it on screen: one view, once a day per person."""
     if promotion.status != Promotion.ACTIVE or promotion.owner_id == viewer.pk:
         return False
+    from django.core.cache import cache
+    if not cache.get(_served_key(promotion.pk, viewer.pk)):
+        return False                     # never shown to them: not a view
     try:
         with transaction.atomic():
             PromotionView.objects.create(promotion=promotion, user=viewer, day=timezone.localdate())
@@ -393,7 +421,7 @@ def summary(promotion):
         'package': {'key': p.package.key, 'name': p.package.name},
         'price': p.price, 'views_target': p.views_target, 'days': p.days, 'counties': p.counties,
         'views': p.views, 'clicks': p.clicks, 'follows': p.follows,
-        'payment_note': p.payment_note, 'mpesa_receipt': p.mpesa_receipt,
+        'payment_note': p.payment_note, 'mpesa_receipt': p.mpesa_receipt, 'payment_phone': p.payment_phone,
         'paid_at': p.paid_at, 'starts_at': p.starts_at, 'ends_at': p.ends_at,
         'review_note': p.review_note, 'refund_due': p.refund_due, 'refund_owed': refund_owed(p),
         'created_at': p.created_at,

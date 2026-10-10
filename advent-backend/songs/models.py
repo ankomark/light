@@ -4263,11 +4263,14 @@ class Promotion(models.Model):
 
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='promotions')
     kind = models.CharField(max_length=10, choices=KIND_CHOICES)
-    post = models.ForeignKey('SocialPost', null=True, blank=True, on_delete=models.CASCADE, related_name='promotions')
-    product = models.ForeignKey('Product', null=True, blank=True, on_delete=models.CASCADE, related_name='promotions')
-    publication = models.ForeignKey('Publication', null=True, blank=True, on_delete=models.CASCADE,
+    # SET_NULL, not CASCADE: deleting the thing must not delete the record of
+    # what was paid for it (the receipt, a refund owed). Without its thing a
+    # promotion is simply not shown, and finishes with the shortfall owed.
+    post = models.ForeignKey('SocialPost', null=True, blank=True, on_delete=models.SET_NULL, related_name='promotions')
+    product = models.ForeignKey('Product', null=True, blank=True, on_delete=models.SET_NULL, related_name='promotions')
+    publication = models.ForeignKey('Publication', null=True, blank=True, on_delete=models.SET_NULL,
                                     related_name='promotions')
-    service = models.ForeignKey('Videostudio', null=True, blank=True, on_delete=models.CASCADE,
+    service = models.ForeignKey('Videostudio', null=True, blank=True, on_delete=models.SET_NULL,
                                 related_name='promotions')
     package = models.ForeignKey(PromotionPackage, on_delete=models.PROTECT, related_name='promotions')
     # What was bought, kept as it was: the package's price may change later.

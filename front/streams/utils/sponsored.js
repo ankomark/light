@@ -8,16 +8,22 @@ export const SPONSORED_AT = [3, 14];
  *  organic copy, if any, dropped), anything else as a sponsored card row.
  *  A list too short for a slot just doesn't get that promotion. */
 export const withSponsored = (posts, sponsored, prepare = (p) => p) => {
-  if (!sponsored?.length) return posts;
-  const promotedIds = new Set(sponsored.filter((s) => s.post).map((s) => s.post.id));
-  const out = posts.filter((p) => !promotedIds.has(p.id));
+  // Only what can be drawn: a promoted post needs its post, the rest their card.
+  sponsored = (sponsored || []).filter((s) => (s.kind === 'post' ? !!s.post
+    : !!(s.profile || s.product || s.service || s.book)));
+  if (!sponsored.length) return posts;
+  let out = posts.slice();
   sponsored.forEach((s, i) => {
     const at = SPONSORED_AT[i];
-    if (at == null || out.length < at) return;
+    if (at == null) return;
+    // The organic copy of a promoted post goes only once its sponsored copy
+    // has a place: a short feed must never lose the post altogether.
+    const rest = s.post ? out.filter((p) => p.id !== s.post.id) : out;
+    if (rest.length < at) return;
     const row = s.post
       ? { ...prepare({ ...s.post }), sponsored: { promotion_id: s.promotion_id } }
       : { id: `sp-${s.promotion_id}`, sponsoredCard: s };
-    out.splice(at, 0, row);
+    out = [...rest.slice(0, at), row, ...rest.slice(at)];
   });
   return out;
 };
