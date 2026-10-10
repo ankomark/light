@@ -128,6 +128,14 @@ const Promote = ({ navigation, route }) => {
 
   const kind = promotion?.kind || target?.kind || 'post';
   const chosen = catalog?.packages?.find((p) => p.key === pkg);
+  // Plans are the admins' to add and remove: start on the middle one offered
+  // (or the only one), never on a name that may no longer exist.
+  useEffect(() => {
+    const list = catalog?.packages || [];
+    if (!promotion && list.length && !list.some((p) => p.key === pkg)) {
+      setPkg(list[Math.floor((list.length - 1) / 2)].key);
+    }
+  }, [catalog, promotion, pkg]);
   const status = promotion?.status;
   const waiting = status === 'paying';
 

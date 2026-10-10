@@ -10,8 +10,9 @@ Viewers: GET  promotions/serve/?n=2         a couple to place in the feed
          POST promotions/<id>/seen/         it was on screen
          POST promotions/<id>/tap/          {action: open|follow}
 Admins:  GET  admin/promotions/?status=     the queue (manage_promotions)
-         POST admin/promotions/<id>/<approve|reject|refunded>/  {note?}
-         GET/PATCH admin/promotion-packages/[<key>/]   prices
+         POST admin/promotions/<id>/<approve|reject|pause|resume|stop|refunded>/  {note?}
+         GET/POST admin/promotion-packages/, PATCH/DELETE admin/promotion-packages/<key>/
+         GET/PUT admin/promotion-till/, POST/GET admin/promotion-till/test/
 """
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
@@ -64,7 +65,13 @@ class PromotionPromotable(APIView):
 
 class Promotions(APIView):
     permission_classes = [permissions.IsAuthenticated, IsNotSuspended]
-    throttle_scope = 'promotion'
+
+    def get_throttles(self):
+        # Making promotions is limited ('promotion'); looking at mine is not —
+        # a list reloaded on every visit must never use up the payments.
+        if self.request.method == 'POST':
+            self.throttle_scope = 'promotion'
+        return super().get_throttles()
 
     def get(self, request):
         promo.reconcile_payments(owner=request.user, limit=3)

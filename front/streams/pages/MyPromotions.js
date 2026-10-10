@@ -17,7 +17,7 @@ import { colors, spacing, radius } from '../constants/theme';
 import { formatViews } from './Promote';
 
 const STATUS_COLOR = {
-  unpaid: '#FFC857', paying: '#FFC857', review: '#9B8CFF', active: '#2EC4B6',
+  unpaid: '#FFC857', paying: '#FFC857', review: '#9B8CFF', active: '#2EC4B6', paused: '#8EA0B4',
   done: '#8EA0B4', rejected: '#FF7A59', cancelled: '#5E7187',
 };
 
@@ -40,7 +40,7 @@ const Row = ({ p, t, onPay, onCancel }) => {
       <Text style={styles.sub}>
         {`${p.package?.name} · KES ${formatViews(p.price)} · ${p.counties?.length ? p.counties.join(', ') : t('promote.everyone')}`}
       </Text>
-      {['active', 'done'].includes(p.status) && (
+      {['active', 'paused', 'done'].includes(p.status) && (
         <>
           <View style={styles.track}><View style={[styles.fill, { width: `${share * 100}%` }]} /></View>
           <View style={styles.stats}>
@@ -51,6 +51,7 @@ const Row = ({ p, t, onPay, onCancel }) => {
         </>
       )}
       {p.status === 'review' ? <Text style={styles.note}>{t('promote.reviewWait')}</Text> : null}
+      {p.status === 'paused' ? <Text style={styles.note}>{t('promote.pausedNote')}</Text> : null}
       {p.status === 'rejected' && p.review_note ? <Text style={styles.note}>{t('promote.declinedBecause', { why: p.review_note })}</Text> : null}
       {p.refund_due ? <Text style={styles.refund}>{t('promote.refundOwed', { amount: formatViews(p.refund_owed) })}</Text> : null}
       {p.status === 'unpaid' && (

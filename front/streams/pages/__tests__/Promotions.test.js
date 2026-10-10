@@ -226,3 +226,21 @@ describe('admins', () => {
       expect.objectContaining({ name: 'Mega', price: 2000, views: 15000, days: 7 }));
   });
 });
+
+test('plans are the admins’: the screen starts on one that exists', async () => {
+  mockApi.fetchPromotionPackages.mockResolvedValue({
+    packages: [{ key: 'mini', name: 'Mini', price: 100, views: 400, days: 2 },
+      { key: 'mega', name: 'Mega', price: 900, views: 6000, days: 7 }],
+    counties: [],
+  });
+  const screen = render(<Promote navigation={nav()} route={{ params: { kind: 'profile' } }} />);
+  await waitFor(() => expect(screen.getByTestId('promote-package-mini').props.accessibilityState).toMatchObject({ checked: true }));
+  expect(screen.getByText('promote.pay:100')).toBeTruthy();
+});
+
+test('a paused promotion says so in my list', async () => {
+  mockApi.fetchMyPromotions.mockResolvedValue([promotion({ id: 4, status: 'paused', views: 50 })]);
+  const screen = render(<MyPromotions navigation={nav()} />);
+  await waitFor(() => expect(screen.getByText('promote.status.paused')).toBeTruthy());
+  expect(screen.getByText('promote.pausedNote')).toBeTruthy();
+});

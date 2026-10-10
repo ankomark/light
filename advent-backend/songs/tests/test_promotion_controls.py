@@ -109,3 +109,41 @@ class ControlTests(APITestCase):
         self.assertEqual(call.call_args.kwargs['body'], {'till': '8821774', 'phone': '0712345678'})
         self.client.force_authenticate(self.owner)
         self.assertEqual(self.client.get('/api/admin/promotion-till/').status_code, 403)
+
+
+@override_settings(TICKETING_SERVICE_KEY=KEY, TICKETING_API_URL='https://tickets.test')
+class RescanTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.owner = User.objects.create_user('own', 'own@x.com', 'x')
+        self.post = SocialPost.objects.create(user=self.owner, content_type='image', media_file='https://m/1.jpg')
+        self.client.force_authenticate(self.owner)
+
+    def buy(self, package='standard'):
+        return self.client.post('/api/promotions/', {'kind': 'post', 'target_id': self.post.id, 'package': package},
+                                format='json')
+
+    def test_trying_again_takes_up_the_unpaid_one(self):
+        first = self.buy('standard').data
+        again = self.buy('starter').data
+        self.assertEqual(again['id'], first['id'])
+        self.assertEqual((again['package']['key'], again['price']), ('starter', 200))
+        self.assertEqual(Promotion.objects.filter(owner=self.owner).count(), 1)
+
+    def test_no_money_taken_for_a_thing_that_is_gone(self):
+        pid = self.buy().data['id']
+        self.post.delete()
+        with mock.patch('songs.ticketing_staff.call') as call:
+            res = self.client.post(f'/api/promotions/{pid}/pay/', {'phone': '0712345678'}, format='json')
+        self.assertEqual(res.data['code'], 'gone')
+        call.assert_not_called()
+
+    @override_settings(REST_FRAMEWORK={
+        'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.SessionAuthentication'],
+        'DEFAULT_THROTTLE_CLASSES': ['rest_framework.throttling.ScopedRateThrottle'],
+        'DEFAULT_THROTTLE_RATES': {'promotion': '2/hour'},
+    })
+    def test_looking_at_my_list_never_uses_up_paying(self):
+        for _ in range(5):
+            self.assertEqual(self.client.get('/api/promotions/').status_code, 200)
+        self.assertEqual(self.buy().status_code, 201)

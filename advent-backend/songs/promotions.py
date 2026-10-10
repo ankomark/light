@@ -107,9 +107,19 @@ def create(owner, kind, target_id, package_key, counties=None):
     same = Promotion.objects.filter(owner=owner, kind=kind, status__in=LIVE, **target)
     if same.exists():
         raise Refused('already', 'This is already being promoted.')
+    counties = clean_counties(counties)
+    # Started before and never paid for: that one again, with what is chosen
+    # now — not a second unpaid one in their list for every try.
+    unpaid = Promotion.objects.filter(owner=owner, kind=kind, status=Promotion.UNPAID, **target).first()
+    if unpaid:
+        unpaid.package, unpaid.price, unpaid.views_target, unpaid.days = (
+            package, package.price, package.views, package.days)
+        unpaid.counties = counties
+        unpaid.save(update_fields=['package', 'price', 'views_target', 'days', 'counties', 'updated_at'])
+        return unpaid
     return Promotion.objects.create(
         owner=owner, kind=kind, package=package, price=package.price, views_target=package.views,
-        days=package.days, counties=clean_counties(counties), **target,
+        days=package.days, counties=counties, **target,
     )
 
 
@@ -118,6 +128,10 @@ def pay(promotion, phone):
     from . import ticketing_staff
     if promotion.status not in (Promotion.UNPAID, Promotion.PAYING):
         raise Refused('paid', 'This promotion has been paid for.')
+    if promotion.status == Promotion.UNPAID and not _still_showable(promotion):
+        # Deleted, taken down, sold out or made private since: never take
+        # money for a promotion that could not run.
+        raise Refused('gone', 'What this promotes is no longer available, so it cannot be paid for.')
     if not promotion.payment_reference:
         # Kept before the prompt is asked for: if the answer is lost on the
         # way back (the prompt went, the network didn't), the next try reuses
