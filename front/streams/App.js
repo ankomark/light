@@ -99,6 +99,9 @@ import UserGuide from './pages/UserGuide';
 import LegalPage from './pages/LegalPage';
 import PrivacyCentre from './pages/PrivacyCentre';
 import Settings from './pages/Settings';
+import Promote from './pages/Promote';
+import MyPromotions from './pages/MyPromotions';
+import AdminPromotions from './components/admin/AdminPromotions';
 import Help from './pages/Help';
 import BlockedUsers from './pages/BlockedUsers';
 import FollowRequests from './pages/FollowRequests';
@@ -550,6 +553,8 @@ const App = () => {
                 <Stack.Screen name="PrivacyCentre" component={PrivacyCentre} />
                 <Stack.Screen name="LegalPage" component={LegalPage} />
                 <Stack.Screen name="Settings" component={Settings} options={{ headerShown: false }} />
+                <Stack.Screen name="Promote" component={PromoteWrapper} options={{ headerShown: false }} />
+                <Stack.Screen name="MyPromotions" component={MyPromotionsWrapper} options={{ headerShown: false }} />
                 <Stack.Screen name="Help" component={Help} options={{ headerShown: false }} />
                 <Stack.Screen name="BlockedUsers" component={BlockedUsers} options={{ headerShown: false }} />
                 <Stack.Screen name="FollowRequests" component={FollowRequests} options={{ headerShown: false }} />
@@ -606,6 +611,7 @@ const App = () => {
                 <Stack.Screen name="AdminBroadcast" component={AdminBroadcastWrapper} />
                 <Stack.Screen name="AdminSingles" component={AdminSinglesWrapper} />
                 <Stack.Screen name="AdminTickets" component={AdminTicketsWrapper} />
+                <Stack.Screen name="AdminPromotions" component={AdminPromotionsWrapper} />
                 <Stack.Screen name="AdminTicketEvent" component={AdminTicketEventWrapper} />
                 <Stack.Screen name="AdminTicketTill" component={AdminTicketTillWrapper} />
                 <Stack.Screen name="AdminTicketOrganiser" component={AdminTicketOrganiserWrapper} />
@@ -1152,6 +1158,21 @@ const AdminMonitorWrapper = adminWrap(AdminMonitor);
 const AdminBroadcastWrapper = adminWrap(AdminBroadcast);
 const AdminSinglesWrapper = adminWrap(AdminSingles);
 const AdminTicketsWrapper = adminWrap(AdminTickets);
+const AdminPromotionsWrapper = adminWrap(AdminPromotions);
+
+// Promotions: the app's wallpaper behind them; the screens draw their own bar.
+const promoWrap = (Screen, fallbackMessage) => function PromoScreen({ navigation, route }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0A1628' }}>
+      <RotatingBackground intervalMs={60000} scrimColor="rgba(10,22,40,0.72)" />
+      <ErrorBoundary fallbackMessage={fallbackMessage}>
+        <Screen navigation={navigation} route={route} />
+      </ErrorBoundary>
+    </View>
+  );
+};
+const PromoteWrapper = promoWrap(Promote, "Promotions couldn't load.");
+const MyPromotionsWrapper = promoWrap(MyPromotions, "Your promotions couldn't load.");
 const AdminTicketEventWrapper = adminWrap(AdminTicketEvent);
 const AdminTicketTillWrapper = adminWrap(AdminTicketTill);
 const AdminTicketOrganiserWrapper = adminWrap(AdminTicketOrganiser);

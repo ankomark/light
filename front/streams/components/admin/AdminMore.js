@@ -31,6 +31,7 @@ const TOOLS = [
   ['verify_accounts', 'AdminVerify', 'check-decagram-outline', 'verify'],
   ['review_singles', 'AdminSingles', 'ring', 'singles'],
   ['manage_tickets', 'AdminTickets', 'ticket-confirmation-outline', 'tickets'],
+  ['manage_promotions', 'AdminPromotions', 'bullhorn-outline', 'promotions'],
   ['manage_quiz', 'AdminQuizCenter', 'trophy-outline', 'quizCenter'],
   ['manage_quiz', 'AdminQuizBank', 'head-question-outline', 'quiz'],
   ['manage_puzzles', 'AdminPuzzleThemes', 'puzzle-outline', 'puzzles'],

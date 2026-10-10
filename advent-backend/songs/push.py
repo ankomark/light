@@ -23,6 +23,9 @@ NOTIFICATION_TITLES = {
     'milestone': '\U0001f389 Milestone',
     'new_book': '\U0001f4d6 New book',
     'new_chapter': '\U0001f4d6 New chapter',
+    # Your promotion: paid, approved, declined, finished. No switch: it is
+    # about money you paid.
+    'promotion': '\U0001f4e3 Your promotion',
     'book_discussion': '\U0001f4ac Book discussion',
     'book_review': '⭐ New review',
     'book_invite': '✍️ Invitation to write',

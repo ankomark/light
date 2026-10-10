@@ -28,7 +28,10 @@ import { usePreferences } from '../context/PreferencesContext';
 import { PREF_KEYS, resolveVideoQuality } from '../utils/preferences';
 import { useI18n } from '../context/I18nContext';
 import SearchBaar from '../components/SearchBaar';
-import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, markPostsViewed, fetchLatestPostId, likePost } from '../services/api';
+import { fetchSocialPosts, fetchFeedByUrl, logWatchEvents, markPostsViewed, fetchLatestPostId, likePost,
+  fetchSponsored, reportPromotionSeen, reportPromotionTap } from '../services/api';
+import SponsoredCard, { SponsoredLabel } from './SponsoredCard';
+import { withSponsored } from '../utils/sponsored';
 import FollowButton from '../components/FollowButton';
 import PostActions from './PostActions';
 import CommentAction from './CommentAction';
@@ -686,6 +689,9 @@ const SocialFeed = ({ showBackground = true }) => {
   const [newPostsAvailable, setNewPostsAvailable] = useState(false);
   const [topBarH, setTopBarH] = useState(0);
   const [error, setError] = useState(null);
+  // Promotions placed among the posts (withSponsored); reported seen once each.
+  const [sponsored, setSponsored] = useState([]);
+  const sponsoredSeenRef = useRef(new Set());
   // Local follow overrides, applied to freshly-fetched rows so a follow the user
   // just made isn't undone by a page that was already in flight.
   //
@@ -873,6 +879,14 @@ const SocialFeed = ({ showBackground = true }) => {
 
       setPosts(processed);
       postsKeyRef.current = search ? null : cacheKey;
+      // Paid promotions: on For You only, fetched with page one (never in a
+      // search). Nothing to show, or no answer, is simply none.
+      if (useRank) {
+        fetchSponsored(2).then((s) => { if (!stale()) setSponsored(Array.isArray(s) ? s : []); })
+          .catch(() => setSponsored([]));
+      } else {
+        setSponsored([]);
+      }
       prefetchMedia(processed);
       setNextUrl(response?.next ?? null);
       setHasMore(!!response?.next);
@@ -1178,6 +1192,13 @@ const SocialFeed = ({ showBackground = true }) => {
     changed.forEach((entry) => {
       const post = entry.item;
       if (!post) return;
+      // A promotion on screen is one paid view (the server counts it once a day).
+      const promoId = post.sponsored?.promotion_id ?? post.sponsoredCard?.promotion_id;
+      if (entry.isViewable && promoId && !sponsoredSeenRef.current.has(promoId)) {
+        sponsoredSeenRef.current.add(promoId);
+        reportPromotionSeen(promoId).catch(() => {});
+      }
+      if (post.sponsoredCard) return;            // not a post: no dwell, no song
       if (entry.isViewable) {
         // Start the dwell timer for this post.
         viewStartRef.current[post.id] = Date.now();
@@ -1313,10 +1334,11 @@ const SocialFeed = ({ showBackground = true }) => {
         <TouchableOpacity
           style={styles.userInfo}
           activeOpacity={0.7}
-          onPress={() => item.user?.id && navigation.navigate('UserProfile', {
-            userId: item.user.id,
-            username: item.user.username,
-          })}
+          onPress={() => {
+            if (!item.user?.id) return;
+            if (item.sponsored) reportPromotionTap(item.sponsored.promotion_id, 'open').catch(() => {});
+            navigation.navigate('UserProfile', { userId: item.user.id, username: item.user.username });
+          }}
         >
           <View style={styles.avatarRing}>
             <Image
@@ -1346,7 +1368,8 @@ const SocialFeed = ({ showBackground = true }) => {
               {timeAgo(item.created_at, t)}
               {item.location ? `  ·  ${item.location}` : ''}
             </Text>
-            {FEED_REASON[item.feed_reason] && (
+            {item.sponsored ? <SponsoredLabel /> : null}
+            {!item.sponsored && FEED_REASON[item.feed_reason] && (
               <View style={styles.reasonChip}>
                 <MaterialIcons
                   name={FEED_REASON[item.feed_reason].icon}
@@ -1452,7 +1475,11 @@ const SocialFeed = ({ showBackground = true }) => {
   }, []);
   const closePhotos = useCallback(() => setViewer(null), []);
 
-  const renderItem = useCallback(({ item }) => (
+  const listData = useMemo(() => withSponsored(posts, sponsored, processPost), [posts, sponsored]);
+
+  const renderItem = useCallback(({ item }) => (item.sponsoredCard ? (
+    <SponsoredCard promo={item.sponsoredCard} width={cardW} />
+  ) : (
     <PostCard
       item={item}
       cardW={cardW}
@@ -1467,7 +1494,7 @@ const SocialFeed = ({ showBackground = true }) => {
       renderHeader={renderPostHeader}
       renderFooter={renderPostFooter}
     />
-  ), [cardW, renderPostHeader, renderPostFooter, focusedVideoId, isMuted, toggleMute,
+  )), [cardW, renderPostHeader, renderPostFooter, focusedVideoId, isMuted, toggleMute,
       currentlyPlayingPostId, isAudioPlaying, toggleSongPlayback, handleDoubleTapLike, openPhotos]);
 
   const renderEmptyComponent = useCallback(() => {
@@ -1651,7 +1678,7 @@ const SocialFeed = ({ showBackground = true }) => {
         // posting a comment took two taps. 'handled' lets the button take it.
         keyboardShouldPersistTaps="handled"
         ref={flatListRef}
-        data={posts}
+        data={listData}
         renderItem={renderItem}
         ListHeaderComponent={
           <View>

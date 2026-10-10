@@ -13,7 +13,7 @@ import { useI18n } from '../context/I18nContext';
 
 const DOUBLE_TAP_MS = 280;
 
-const BookPostMedia = ({ item, width, onDoubleTapLike }) => {
+const BookPostMedia = ({ item, width, onDoubleTapLike, onOpen }) => {
   const { t } = useI18n();
   const navigation = useNavigation();
   const book = item.book || {};
@@ -24,6 +24,7 @@ const BookPostMedia = ({ item, width, onDoubleTapLike }) => {
   useEffect(() => () => clearTimeout(tap.current.timer), []);
 
   const open = useCallback(() => {
+    onOpen?.();
     if (quote && book.chapter_id) {
       navigation.navigate('ChapterReader', { id: book.id, chapterId: book.chapter_id, block: book.block ?? 0 });
     } else {
@@ -31,7 +32,7 @@ const BookPostMedia = ({ item, width, onDoubleTapLike }) => {
         id: book.id, preview: { id: book.id, title: book.title, cover: book.cover, author: book.author },
       });
     }
-  }, [navigation, book.id, book.chapter_id, book.block, book.title, book.cover, book.author, quote]);
+  }, [navigation, book.id, book.chapter_id, book.block, book.title, book.cover, book.author, quote, onOpen]);
 
   const onPress = () => {
     const s = tap.current;

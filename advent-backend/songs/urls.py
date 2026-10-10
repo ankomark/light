@@ -4,6 +4,10 @@ from django.urls import path
 from .views.organizations import OrganizationViewSet
 from .views.admin_music import AdminMusicView, AdminMusicGenresView, AdminMusicPicksView
 from .views.admin_security_centre import AdminSecurityCentreViewSet
+from .views.promotions import (
+    PromotionPackages, Promotions, PromotionDetail, PromotionPay, PromotionCancel, PromotionServe,
+    PromotionSeen, PromotionTap, AdminPromotions, AdminPromotionAction, AdminPromotionPackages,
+)
 from .views.admin_tickets import (
     AdminTicketsStats, AdminTicketsAudit, AdminTicketEvents, AdminTicketEvent, AdminTicketEventAction,
     AdminTicketTills, AdminTicketTill, AdminTicketTillAction,
@@ -327,6 +331,19 @@ urlpatterns = [
     path('singles/discover/', SinglesDiscoverView.as_view(), name='singles-discover'),
     path('admin/singles-stats/', AdminSinglesStatsView.as_view(), name='admin-singles-stats'),
     # Events & Tickets, as Skylink's staff (views/admin_tickets.py).
+    # Paid promotions (views/promotions.py).
+    path('promotions/', Promotions.as_view(), name='promotions'),
+    path('promotions/packages/', PromotionPackages.as_view(), name='promotion-packages'),
+    path('promotions/serve/', PromotionServe.as_view(), name='promotion-serve'),
+    path('promotions/<int:pk>/', PromotionDetail.as_view(), name='promotion'),
+    path('promotions/<int:pk>/pay/', PromotionPay.as_view(), name='promotion-pay'),
+    path('promotions/<int:pk>/cancel/', PromotionCancel.as_view(), name='promotion-cancel'),
+    path('promotions/<int:pk>/seen/', PromotionSeen.as_view(), name='promotion-seen'),
+    path('promotions/<int:pk>/tap/', PromotionTap.as_view(), name='promotion-tap'),
+    path('admin/promotions/', AdminPromotions.as_view(), name='admin-promotions'),
+    path('admin/promotions/<int:pk>/<str:action>/', AdminPromotionAction.as_view(), name='admin-promotion-action'),
+    path('admin/promotion-packages/', AdminPromotionPackages.as_view(), name='admin-promotion-packages'),
+    path('admin/promotion-packages/<slug:key>/', AdminPromotionPackages.as_view(), name='admin-promotion-package'),
     path('admin/tickets/stats/', AdminTicketsStats.as_view(), name='admin-tickets-stats'),
     path('admin/tickets/audit/', AdminTicketsAudit.as_view(), name='admin-tickets-audit'),
     path('admin/tickets/events/', AdminTicketEvents.as_view(), name='admin-tickets-events'),

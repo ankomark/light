@@ -443,6 +443,15 @@ streams://product/${encodeURIComponent(product.slug || '')}` : '';
           ) : null}
         </View>
 
+        {/* The seller's own: promote it to more buyers. */}
+        {currentUser?.id != null && product.seller?.id === currentUser.id && product.is_available !== false ? (
+          <TouchableOpacity style={styles.promoteBtn} testID="product-promote"
+            onPress={() => navigation.navigate('Promote', { kind: 'product', targetId: product.id, title: product.title })}>
+            <Icon name="bullhorn" size={14} color="#fff" />
+            <Text style={styles.promoteText}>{t('promote.promoteProduct')}</Text>
+          </TouchableOpacity>
+        ) : null}
+
         {/* Contact Information Section */}
         {hasContact && (
         <View style={styles.contactInfoContainer}>
@@ -1187,6 +1196,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 15,
   },
+  promoteBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12,
+    paddingVertical: 12, borderRadius: 24, backgroundColor: '#1DA1F2',
+  },
+  promoteText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 });
 
 export default ProductDetail;

@@ -591,6 +591,16 @@ const ProfileView = ({ userId, initialUsername, onLoaded }) => {
               <TouchableOpacity style={[styles.mainBtn, styles.mainBtnQuiet]} onPress={() => navigation.navigate('CreateProfile')} activeOpacity={0.85}>
                 <Text style={[styles.mainBtnText, styles.mainBtnTextQuiet]}>{t('profile.editProfile')}</Text>
               </TouchableOpacity>
+              {/* Promote your profile: more people, more followers. */}
+              <TouchableOpacity
+                style={styles.squareBtn}
+                onPress={() => navigation.navigate('Promote', { kind: 'profile', title: `@${user.username}` })}
+                activeOpacity={0.85}
+                accessibilityLabel={t('promote.promoteProfile')}
+                testID="profile-promote"
+              >
+                <Ionicons name="megaphone-outline" size={20} color={P.text} />
+              </TouchableOpacity>
               {/* Saved music & posts (your own profile only). */}
               <TouchableOpacity
                 style={styles.squareBtn}

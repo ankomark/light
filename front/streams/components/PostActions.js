@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { createContext, useContext, useRef, useState } from 'react';
+import * as Navigation from '@react-navigation/native';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet, Modal, Alert, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import KeyboardLift from './tickets/KeyboardLift';
@@ -11,7 +12,14 @@ import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { EmojiTextInput } from './EmojiKeyboard';
 
+// No navigator above (tests, previews) or a navigation stand-in without it: none.
+const NO_NAVIGATION = createContext(undefined);
+
 const PostActions = ({ post, onUpdate, onDelete, onNotInterested, variant }) => {
+  // Context, not useNavigation(): this also renders outside a navigator (tests,
+  // previews), where there is simply no Promote.
+  const navigation = useContext(Navigation.NavigationContext || NO_NAVIGATION);
+  const canPromote = !!navigation && (post.visibility || 'public') === 'public';
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const editScroll = useRef(null);
@@ -182,6 +190,19 @@ const PostActions = ({ post, onUpdate, onDelete, onNotInterested, variant }) => 
               <MaterialIcons name="edit" size={22} color={colors.primary} />
               <Text style={styles.sheetLabel}>{t('post.edit')}</Text>
             </TouchableOpacity>
+            {canPromote ? (
+              <TouchableOpacity
+                style={styles.sheetItem}
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('Promote', { kind: 'post', targetId: post.id, title: (post.caption || '').slice(0, 60) });
+                }}
+                testID="post-promote"
+              >
+                <MaterialIcons name="campaign" size={22} color={colors.primary} />
+                <Text style={styles.sheetLabel}>{t('promote.promotePost')}</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               style={styles.sheetItem}
               onPress={() => { setMenuVisible(false); handleDeletePost(); }}

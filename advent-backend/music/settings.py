@@ -267,6 +267,8 @@ REST_FRAMEWORK = {
         'admin_bulk': '30/min',
         # Live broadcasting abuse guards.
         'go_live': '20/hour',
+        # Creating and paying for promotions (each pay is an M-Pesa prompt).
+        'promotion': '30/hour',
         'cohost_request': '30/hour',
         # Likes are flushed every 5 s; on-screen text is set by hand.
         'live_react': '30/min',

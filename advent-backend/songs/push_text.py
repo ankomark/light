@@ -34,6 +34,7 @@ TITLES = {
         'milestone': '\U0001f389 Hatua mpya',
         'new_book': '\U0001f4d6 Kitabu kipya',
         'new_chapter': '\U0001f4d6 Sura mpya',
+        'promotion': '\U0001f4e3 Tangazo lako',
         'book_discussion': '\U0001f4ac Mjadala wa kitabu',
         'book_review': '⭐ Tathmini mpya',
         'book_invite': '✍️ Mwaliko wa kuandika',

@@ -37,6 +37,7 @@ ADMIN_CAPABILITIES = (
     ('review_singles', 'Review Single & Searching profiles and photos'),
     ('manage_tickets', 'Approve events & activate ticket tills (Events & Tickets)'),
     ('manage_security', 'Security centre: attacks, blocked addresses, locked accounts, recovery'),
+    ('manage_promotions', 'Review paid promotions & set their prices'),
 )
 ADMIN_CAPABILITY_KEYS = [key for key, _label in ADMIN_CAPABILITIES]
 
@@ -4225,3 +4226,89 @@ class SinglesVerification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+
+# ── Paid promotions (songs/promotions.py) ────────────────────────────────────
+
+class PromotionPackage(models.Model):
+    """What a promotion can be bought as: a price for a number of views over
+    some days. Prices are the admins' to change (manage_promotions)."""
+    key = models.SlugField(max_length=30, unique=True)
+    name = models.CharField(max_length=60)
+    price = models.PositiveIntegerField(help_text='KES')
+    views = models.PositiveIntegerField(help_text='Views promised')
+    days = models.PositiveSmallIntegerField()
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['order', 'price']
+
+    def __str__(self):
+        return f'{self.name} KES {self.price} / {self.views} views / {self.days} d'
+
+
+class Promotion(models.Model):
+    """One paid push for a post, a profile, a product, a book or a service.
+
+    unpaid ──pay──▶ paying ──paid──▶ review ──approve──▶ active ──▶ done
+                       └─failed─▶ unpaid       └─reject──▶ rejected (refund due)
+    """
+    KIND_POST, KIND_PROFILE, KIND_PRODUCT, KIND_BOOK, KIND_SERVICE = 'post', 'profile', 'product', 'book', 'service'
+    KIND_CHOICES = [(k, k.title()) for k in (KIND_POST, KIND_PROFILE, KIND_PRODUCT, KIND_BOOK, KIND_SERVICE)]
+    UNPAID, PAYING, REVIEW, ACTIVE, DONE, REJECTED, CANCELLED = (
+        'unpaid', 'paying', 'review', 'active', 'done', 'rejected', 'cancelled')
+    STATUS_CHOICES = [(s, s.title()) for s in (UNPAID, PAYING, REVIEW, ACTIVE, DONE, REJECTED, CANCELLED)]
+
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='promotions')
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    post = models.ForeignKey('SocialPost', null=True, blank=True, on_delete=models.CASCADE, related_name='promotions')
+    product = models.ForeignKey('Product', null=True, blank=True, on_delete=models.CASCADE, related_name='promotions')
+    publication = models.ForeignKey('Publication', null=True, blank=True, on_delete=models.CASCADE,
+                                    related_name='promotions')
+    service = models.ForeignKey('Videostudio', null=True, blank=True, on_delete=models.CASCADE,
+                                related_name='promotions')
+    package = models.ForeignKey(PromotionPackage, on_delete=models.PROTECT, related_name='promotions')
+    # What was bought, kept as it was: the package's price may change later.
+    price = models.PositiveIntegerField()
+    views_target = models.PositiveIntegerField()
+    days = models.PositiveSmallIntegerField()
+    # Counties shown to ([] = everyone), matched against profile locations.
+    counties = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=UNPAID, db_index=True)
+    payment_reference = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    payment_phone = models.CharField(max_length=12, blank=True)
+    payment_note = models.CharField(max_length=255, blank=True)
+    mpesa_receipt = models.CharField(max_length=20, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    review_note = models.CharField(max_length=500, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    refund_due = models.BooleanField(default=False)
+    starts_at = models.DateTimeField(null=True, blank=True)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    views = models.PositiveIntegerField(default=0)
+    clicks = models.PositiveIntegerField(default=0)
+    follows = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['status', 'ends_at'])]
+
+    def __str__(self):
+        return f'{self.kind} promotion #{self.pk} by {self.owner_id} ({self.status})'
+
+
+class PromotionView(models.Model):
+    """One viewer seeing one promotion on one day: a view counts once a day
+    per person, so scrolling past it again is not paid for twice."""
+    promotion = models.ForeignKey(Promotion, on_delete=models.CASCADE, related_name='seen_by')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='+')
+    day = models.DateField()
+    clicked = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['promotion', 'user', 'day'], name='promotionview_once_a_day')]

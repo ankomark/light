@@ -276,6 +276,13 @@ const PublicationDetail = ({ route, navigation }) => {
               accessibilityRole="button" accessibilityLabel={t('pub.editTitle')} testID="pub-edit">
               <MaterialIcons name="edit" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
+            {pub.is_owner && pub.status === 'published' ? (
+              <TouchableOpacity style={styles.iconBtn} hitSlop={8} testID="pub-promote"
+                onPress={() => navigation.navigate('Promote', { kind: 'book', targetId: pub.id, title: pub.title })}
+                accessibilityRole="button" accessibilityLabel={t('promote.promoteBook')}>
+                <MaterialIcons name="campaign" size={21} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ) : null}
             {pub.is_owner ? (
               <TouchableOpacity style={styles.iconBtn} onPress={onDelete} hitSlop={8}
                 accessibilityRole="button" accessibilityLabel={t('pubDetail.deleteTitle')} testID="pub-delete">

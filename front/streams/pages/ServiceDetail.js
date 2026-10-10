@@ -372,6 +372,11 @@ const ServiceDetail = ({ route, navigation }) => {
                   <Ionicons name="stats-chart" size={13} color={M.gold} />
                   <Text style={styles.ownerBtnText}>{t('services.insights')}</Text>
                 </TouchableOpacity>
+                <TouchableOpacity style={styles.ownerBtn} testID="service-promote"
+                  onPress={() => navigation.navigate('Promote', { kind: 'service', targetId: s.id, title: s.name })}>
+                  <Ionicons name="megaphone-outline" size={13} color={M.gold} />
+                  <Text style={styles.ownerBtnText}>{t('promote.promote')}</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.ownerBtn} testID="service-requests"
                   onPress={() => navigation.navigate('ServiceBookings', { role: 'incoming' })}>
                   <Ionicons name="calendar-outline" size={13} color={M.gold} />

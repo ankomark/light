@@ -2730,3 +2730,19 @@ export const decideSinglesItem = (kind, id, decision, reason = '') =>
   apiRequest('post', `/admin/singles-${kind}/${id}/decide/`, { decision, reason });
 // Every Single & Searching chat, open or ended (the server filters them).
 export const fetchSinglesChats = () => apiRequest('get', '/conversations/', null, { params: { singles: 1, page_size: 100 } });
+
+// ── Paid promotions (backend views/promotions.py) ────────────────────────────
+export const fetchPromotionPackages = () => apiRequest('get', '/promotions/packages/');
+export const fetchMyPromotions = () => apiRequest('get', '/promotions/');
+export const createPromotion = (data) => apiRequest('post', '/promotions/', data);
+export const fetchPromotion = (id) => apiRequest('get', `/promotions/${id}/`);
+export const payPromotion = (id, phone) => apiRequest('post', `/promotions/${id}/pay/`, { phone });
+export const cancelPromotion = (id) => apiRequest('post', `/promotions/${id}/cancel/`);
+export const fetchSponsored = (n = 2) => apiRequest('get', `/promotions/serve/?n=${n}`);
+export const reportPromotionSeen = (id) => apiRequest('post', `/promotions/${id}/seen/`);
+export const reportPromotionTap = (id, action = 'open') => apiRequest('post', `/promotions/${id}/tap/`, { action });
+export const fetchAdminPromotions = (status) => apiRequest('get', `/admin/promotions/${status ? `?status=${status}` : ''}`);
+export const adminPromotionAction = (id, action, note = '') =>
+  apiRequest('post', `/admin/promotions/${id}/${action}/`, { note });
+export const fetchAdminPromotionPackages = () => apiRequest('get', '/admin/promotion-packages/');
+export const updateAdminPromotionPackage = (key, data) => apiRequest('patch', `/admin/promotion-packages/${key}/`, data);

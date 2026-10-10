@@ -108,6 +108,7 @@ const SECTIONS = [
     title: 'Settings & Support',
     items: [
       { label: 'Settings', route: 'Settings', art: SETTINGS_ART },
+      { label: 'My Promotions', route: 'MyPromotions', set: 'mci', icon: 'bullhorn-outline', tint: '#FFC46B' },
       { label: 'Help', route: 'Help', art: HELP_ART },
       { label: 'User Guide', route: 'UserGuide', art: GUIDE_ART },
       { label: 'About', route: 'About', art: ABOUT_ART },

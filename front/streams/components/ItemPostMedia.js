@@ -19,7 +19,7 @@ export const formatPrice = (price, currency) => {
   return currency ? `${currency} ${amount}` : amount;
 };
 
-const ItemPostMedia = ({ item, width, onDoubleTapLike }) => {
+const ItemPostMedia = ({ item, width, onDoubleTapLike, onOpen }) => {
   const { t } = useI18n();
   const navigation = useNavigation();
   const isProduct = item.content_type === 'product';
@@ -29,6 +29,7 @@ const ItemPostMedia = ({ item, width, onDoubleTapLike }) => {
   useEffect(() => () => clearTimeout(tap.current.timer), []);
 
   const open = useCallback(() => {
+    onOpen?.();
     if (isProduct) {
       if (thing.slug) {
         navigation.navigate('ProductDetail', {
@@ -39,7 +40,7 @@ const ItemPostMedia = ({ item, width, onDoubleTapLike }) => {
     } else if (thing.id) {
       navigation.navigate('ServiceDetail', { id: thing.id });
     }
-  }, [navigation, isProduct, thing.slug, thing.id, thing.title, thing.price, thing.currency]);
+  }, [navigation, isProduct, thing.slug, thing.id, thing.title, thing.price, thing.currency, onOpen]);
 
   const onPress = () => {
     const s = tap.current;
