@@ -28,13 +28,13 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: advent-backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: |
@@ -45,7 +45,7 @@ jobs:
 
   deploy:
     needs: test                    # a red build never goes live
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: production
     steps:
       - name: SSH key and pinned host key

@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   migrate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: production
     steps:
       - name: SSH key and pinned host key
