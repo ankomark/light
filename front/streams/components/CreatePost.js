@@ -30,16 +30,15 @@ import { userKey } from '../utils/screenCache';
 import { listDrafts, saveDraft, deleteDraft } from '../utils/drafts';
 import { colors, radius, spacing, shadows } from '../constants/theme';
 
-// Instagram-style aspect-ratio clamp (matches the feed's mediaAspectRatio so the
-// preview is WYSIWYG): width:height between 1.91:1 (landscape) and 4:5 (portrait,
-// ratio 0.8). Outside that range the image is center-cropped; the 4:5 floor caps
-// height at 1.25×width so tall portraits never run past the screen. Falls back
-// to square when dimensions are unknown.
+// The preview's shape, the same as the feed and the post page draw it (so what
+// you see is what gets posted): width:height from 9:16 (portrait) to 1.91:1
+// (landscape). A 9:16, 2:3 or 3:4 photo shows whole instead of cut to 4:5;
+// only shapes beyond those ends are centre-cropped. Square when unknown.
 const clampAspect = (w, h) => {
   if (!w || !h) return 1;
   const r = w / h;
   if (!isFinite(r) || r <= 0) return 1;
-  return Math.min(1.91, Math.max(0.8, r));
+  return Math.min(1.91, Math.max(9 / 16, r));
 };
 
 // Accept 1080p and below only; reject 2K/4K. Measured on the shorter edge — a

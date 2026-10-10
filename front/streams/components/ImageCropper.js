@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   View, Text, Modal, StyleSheet, TouchableOpacity, Animated, PanResponder,
-  useWindowDimensions, ActivityIndicator,
+  useWindowDimensions, ActivityIndicator, ScrollView,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Feather } from '@expo/vector-icons';
@@ -10,12 +10,30 @@ import { useI18n } from '../context/I18nContext';
 
 const MAX_ZOOM = 3;
 
-// Instagram crop presets (width:height ratio).
-const ASPECTS = [
-  { key: '4:5', label: '4:5', ratio: 0.8 },
+// Crop shapes (width:height), tallest first. The tall ones keep a portrait
+// photo whole instead of cutting its top and bottom to 4:5; the feed and the
+// post page draw everything from 9:16 to 16:9 at its own shape.
+export const ASPECTS = [
+  { key: '9:16', label: '9:16', ratio: 9 / 16 },
+  { key: '2:3', label: '2:3', ratio: 2 / 3 },
+  { key: '3:4', label: '3:4', ratio: 3 / 4 },
+  { key: '4:5', label: '4:5', ratio: 4 / 5 },
   { key: '1:1', label: '1:1', ratio: 1 },
-  { key: '1.91:1', label: '1.91', ratio: 1.91 },
+  { key: '16:9', label: '16:9', ratio: 16 / 9 },
 ];
+
+// The shape that keeps the most of this picture: the preset nearest its own
+// ratio (compared as logs, so 2:3 vs 3:4 weighs the same either way).
+export const closestAspect = (w, h) => {
+  if (!w || !h) return '4:5';
+  const r = Math.log(w / h);
+  return ASPECTS.reduce((best, a) => (
+    Math.abs(Math.log(a.ratio) - r) < Math.abs(Math.log(best.ratio) - r) ? a : best
+  )).key;
+};
+
+// Room the header, zoom slider, shape chips and hint take around the frame.
+const CHROME_H = 300;
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -31,9 +49,8 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
   const { t } = useI18n();
   // Crop frame width from the live window (was a module-scope Dimensions.get
   // snapshot) so it's correct for the current window size, not the one at import.
-  const { width: screenW } = useWindowDimensions();
-  const FRAME_W = screenW - 32;
-  const [aspectKey, setAspectKey] = useState('4:5');
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const [aspectKey, setAspectKey] = useState(() => closestAspect(imageWidth, imageHeight));
   const [zoom, setZoom] = useState(1);
   const [working, setWorking] = useState(false);
   // A big picked image can take a moment to decode; show a spinner over the
@@ -42,6 +59,10 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
   useEffect(() => { setImgLoading(true); }, [uri]);
 
   const aspect = ASPECTS.find((a) => a.key === aspectKey)?.ratio ?? 0.8;
+  // Full width, unless a tall shape would push the frame past the controls:
+  // then as tall as fits, and narrower to keep the shape.
+  const maxFrameH = Math.max(200, screenH - CHROME_H);
+  const FRAME_W = Math.min(screenW - 32, maxFrameH * aspect);
   const frameH = FRAME_W / aspect;
 
   const iw = imageWidth || 1;
@@ -99,6 +120,11 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
     pan.current = { x: 0, y: 0 };
     translate.setValue({ x: 0, y: 0 });
   };
+
+  // Each new picture opens on the shape that keeps the most of it, centred.
+  useEffect(() => {
+    onPickAspect(closestAspect(imageWidth, imageHeight));
+  }, [uri, imageWidth, imageHeight]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDone = async () => {
     try {
@@ -193,19 +219,23 @@ export default function ImageCropper({ visible, uri, imageWidth, imageHeight, on
             <Feather name="zoom-in" size={18} color="#9bb0c4" />
           </View>
 
-          <View style={styles.aspectRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.aspectRow}>
             {ASPECTS.map((a) => (
               <TouchableOpacity
                 key={a.key}
                 style={[styles.aspectBtn, aspectKey === a.key && styles.aspectBtnActive]}
                 onPress={() => onPickAspect(a.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: aspectKey === a.key }}
+                testID={`aspect-${a.key}`}
               >
                 <Text style={[styles.aspectText, aspectKey === a.key && styles.aspectTextActive]}>
                   {a.label}
                 </Text>
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
           <Text style={styles.hint}>{t('cropper.hint')}</Text>
         </View>
       </View>
@@ -245,9 +275,9 @@ const styles = StyleSheet.create({
   controls: { paddingHorizontal: 20, paddingBottom: 34, paddingTop: 6 },
   zoomRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   zoomSlider: { flex: 1, height: 36 },
-  aspectRow: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
+  aspectRow: { flexGrow: 1, flexDirection: 'row', justifyContent: 'center', gap: 8 },
   aspectBtn: {
-    paddingHorizontal: 18,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 999,
     backgroundColor: '#102E50',
