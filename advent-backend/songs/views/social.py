@@ -113,7 +113,12 @@ def feed_post_queryset(user):
         # Each post's own "who can see this" (everyone / followers / only me).
         .filter(visible_posts_q(user))
         .select_related('user__profile', 'song', 'song__artist', 'song__artist__profile',
-                        'publication', 'publication__author', 'publication__organization', 'book_chapter')
+                        'publication', 'publication__author', 'publication__organization', 'book_chapter',
+                        'product__seller', 'service')
+        .prefetch_related('product__images')
+        # A card goes quiet with its thing: taken down, or no longer for sale.
+        .exclude(product__is_removed=True).exclude(product__is_available=False)
+        .exclude(service__is_removed=True)
         .annotate(author_followers_count=Subquery(author_followers, output_field=IntegerField()))
     )
     if getattr(user, 'is_authenticated', False):

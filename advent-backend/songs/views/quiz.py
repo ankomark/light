@@ -1035,9 +1035,10 @@ class DailyVerseView(APIView):
             cache.set(key, body, self.CACHE_SECONDS)
 
         out = {**body, 'is_today': day == today}
-        # The home-screen widget refreshes on its own every few hours: that
-        # is the phone fetching, not the person reading, so it is not a visit.
-        if day == today and request.query_params.get('via') != 'widget':
+        # The home-screen widget refreshes on its own every few hours, and
+        # the home feed shows the verse to anyone scrolling past: the phone
+        # fetching, not the person opening the verse, so neither is a visit.
+        if day == today and request.query_params.get('via') not in ('widget', 'feed'):
             out['streak'] = self._streak(request.user, today)
         return Response(out)
 

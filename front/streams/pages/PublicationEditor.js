@@ -324,6 +324,8 @@ const PublicationEditor = ({ route, navigation }) => {
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [scheduling, setScheduling] = useState(null);       // the chapter being scheduled
   const [publishOpen, setPublishOpen] = useState(false);
+  // Out before (even if a draft again now): its feed card already went.
+  const [everPublished, setEverPublished] = useState(false);
   const { width } = useWindowDimensions();
   const wide = width >= 900;                                // the chapter outline beside the writing
 
@@ -433,6 +435,7 @@ const PublicationEditor = ({ route, navigation }) => {
         fill(p, { fromServer: true });
         setRole(p.my_role || 'owner');
         setRightsConfirmed(!!p.rights_confirmed_at);
+        setEverPublished(!!p.published_at);
         setLoading(false);
         offerRestore(p.updated_at);
       } catch {
@@ -657,7 +660,7 @@ const PublicationEditor = ({ route, navigation }) => {
    * from the publish sheet), 'keep' (as it is — a published book stays out;
    * co-authors and editors only ever keep), 'unpublish' (back to a draft).
    */
-  const save = async (mode, { rightsConfirmed: confirmed = false, force = false } = {}) => {
+  const save = async (mode, { rightsConfirmed: confirmed = false, force = false, shareToFeed } = {}) => {
     if (uploadsPending) {
       notify(t('pub.uploading'), t('pub.waitUploads'));
       return;
@@ -682,6 +685,7 @@ const PublicationEditor = ({ route, navigation }) => {
       chapters: cleaned,
       ...(confirmed ? { rights_confirmed: true } : {}),
       ...(force ? { force: true } : {}),
+      ...(mode === 'publish' && shareToFeed === false ? { share_to_feed: false } : {}),
     };
     try {
       setSaving(true);
@@ -1152,7 +1156,8 @@ const PublicationEditor = ({ route, navigation }) => {
         book={{ title, cover, summary, chapters }}
         needsRights={!rightsConfirmed}
         onPreview={preview}
-        onPublish={({ rightsConfirmed: ok }) => save('publish', { rightsConfirmed: ok })}
+        onPublish={({ rightsConfirmed: ok, shareToFeed }) => save('publish', { rightsConfirmed: ok, shareToFeed })}
+        firstTime={!everPublished}
         publishing={saving}
         me={currentUser?.username || ''}
         orgs={myOrgs}

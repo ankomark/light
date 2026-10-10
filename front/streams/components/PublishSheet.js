@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from './BottomSheet';
 import { colors, spacing, radius, typography } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
+import ShareToFeedSwitch from './ShareToFeedSwitch';
 
 /** The checks for a book about to go out: [{ key, ok, required }]. */
 export const publishChecks = ({ title, cover, summary, chapters }) => {
@@ -25,11 +26,14 @@ export const publishChecks = ({ title, cover, summary, chapters }) => {
 const PublishSheet = ({
   visible, onClose, book, needsRights, onPreview, onPublish, publishing,
   me = '', orgs = [], publishAs = '', onPublishAs,
+  // First time out: offer the card in the author's feed (on by default).
+  firstTime = false,
 }) => {
   const { t } = useI18n();
   const as = orgs.find((o) => o.slug === publishAs) || null;
   const asName = as ? as.name : me;
   const [agreed, setAgreed] = useState(false);
+  const [shareToFeed, setShareToFeed] = useState(true);
   const checks = publishChecks(book);
   const blocked = checks.some((c) => c.required && !c.ok) || (needsRights && !agreed);
 
@@ -90,6 +94,10 @@ const PublishSheet = ({
           )}
         </View>
 
+        {firstTime ? (
+          <ShareToFeedSwitch value={shareToFeed} onValueChange={setShareToFeed} testID="publish-share-to-feed" />
+        ) : null}
+
         {needsRights ? (
           <TouchableOpacity style={styles.rights} onPress={() => setAgreed((a) => !a)}
             accessibilityRole="checkbox" accessibilityState={{ checked: agreed }} testID="publish-rights">
@@ -101,7 +109,7 @@ const PublishSheet = ({
         <TouchableOpacity
           style={[styles.go, blocked && styles.goOff]}
           disabled={blocked || publishing}
-          onPress={() => onPublish({ rightsConfirmed: agreed })}
+          onPress={() => onPublish({ rightsConfirmed: agreed, shareToFeed: firstTime ? shareToFeed : undefined })}
           accessibilityRole="button"
           testID="publish-go"
         >

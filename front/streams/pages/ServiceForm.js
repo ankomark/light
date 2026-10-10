@@ -25,6 +25,7 @@ import { confirmAction, notify } from '../utils/adminConfirm';
 import { colors, typography, spacing, radius } from '../constants/theme';
 import { useI18n } from '../context/I18nContext';
 import { EmojiTextInput } from '../components/EmojiKeyboard';
+import ShareToFeedSwitch from '../components/ShareToFeedSwitch';
 
 const GALLERY_MAX = 20;
 const CAPTION_MAX = 80;
@@ -83,6 +84,8 @@ const Field = ({ label, value, onChange, placeholder, multiline, keyboardType, t
 const ServiceForm = ({ route, navigation }) => {
   const { t, resolvedLanguage } = useI18n();
   const existing = route.params?.service || null;
+  // A new listing: its card in the owner's feed (on unless switched off).
+  const [shareToFeed, setShareToFeed] = useState(true);
   const [form, setForm] = useState(() => (existing ? fromService(existing)
     : { ...EMPTY, category: route.params?.category || 'media' }));
   const [logo, setLogo] = useState(existing?.logo || '');
@@ -202,6 +205,7 @@ const ServiceForm = ({ route, navigation }) => {
     if (cover.startsWith('http')) payload.cover_image = cover;
     setSaving(true);
     try {
+      if (!existing) payload.share_to_feed = shareToFeed;
       const saved = existing ? await updateVideoStudio(existing.id, payload) : await createVideoStudio(payload);
       noteServicesChanged({
         item: { ...saved, logo: saved.logo || logo, cover_image: saved.cover_image || cover, is_owner: true },
@@ -476,6 +480,10 @@ const ServiceForm = ({ route, navigation }) => {
         lang={resolvedLanguage === 'sw' ? 'sw' : 'en'} initialQuery={form.location}
         onPick={(p) => { setPin(p); setPinning(false); }} />
 
+      {!existing ? (
+        <ShareToFeedSwitch value={shareToFeed} onValueChange={setShareToFeed}
+                           style={{ paddingHorizontal: spacing.md }} testID="service-share-to-feed" />
+      ) : null}
       <View style={styles.saveBar}>
         <TouchableOpacity style={[styles.saveBtn, styles.cancel]} onPress={() => navigation.goBack()} disabled={saving}>
           <Text style={styles.cancelText}>{t('common.cancel')}</Text>

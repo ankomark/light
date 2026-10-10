@@ -401,6 +401,8 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         publication = Publication.objects.create(**validated_data)
         self._sync_chapters(publication, chapters)
         announce(publication, was_published=False, newly_visible_chapters=[])
+        from ..feed_cards import post_book
+        post_book(publication, self.context.get('request'))   # a no-op for drafts
         return publication
 
     def update(self, instance, validated_data):
@@ -428,4 +430,8 @@ class PublicationDetailSerializer(serializers.ModelSerializer):
         instance.save()
         appeared = self._sync_chapters(instance, chapters) if chapters is not None else []
         announce(instance, was_published=was_published, newly_visible_chapters=appeared)
+        if not was_published:
+            # Out for the first time: its card in the author's feed.
+            from ..feed_cards import post_book
+            post_book(instance, self.context.get('request'))
         return instance

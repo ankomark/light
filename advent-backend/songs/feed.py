@@ -430,6 +430,32 @@ def _diversify(ordered, authors, window, cap):
     return out
 
 
+# Book / product / service cards are welcome, a catalogue is not: at most one
+# in every CARD_GAP posts, never two in a row. Cards that can't be placed in
+# this snapshot wait for the next one.
+CARD_GAP = _cfg('FEED_CARD_GAP', 5)
+
+
+def space_cards(ordered, card_ids, gap=CARD_GAP):
+    """`ordered` with the cards in `card_ids` held back until `gap - 1`
+    ordinary posts have gone by since the last card. Order is otherwise kept;
+    cards left over when the ordinary posts run out are dropped."""
+    if not card_ids:
+        return list(ordered)
+    out, waiting = [], []
+    since = gap                       # a card may lead the feed
+    for pid in ordered:
+        if pid in card_ids:
+            waiting.append(pid)
+        else:
+            out.append(pid)
+            since += 1
+        if waiting and since >= gap - 1:
+            out.append(waiting.pop(0))
+            since = 0
+    return out
+
+
 # The Videos page runs out of ranked videos sooner than the home feed runs out
 # of posts (fewer of them, and only the last fortnight is ranked). After the
 # ranked ones it goes on through the rest, newest first, so it never ends while
@@ -521,6 +547,10 @@ def build_ranked_feed(user, ctype=None):
     )[:SNAPSHOT_SIZE]
     if ctype:
         ranked = ranked + _catalogue(user, ctype, set(ranked), blocked, hidden, followee_ids)
+    else:
+        cards = set(SocialPost.objects.filter(id__in=ranked, content_type__in=SocialPost.CARD_TYPES)
+                    .values_list('id', flat=True))
+        ranked = space_cards(ranked, cards)
     return ranked
 
 

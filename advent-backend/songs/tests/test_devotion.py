@@ -237,3 +237,9 @@ class VerseStreakApiTests(APITestCase):
         self.assertEqual(res.status_code, 200)
         self.assertNotIn('streak', res.data)
         self.assertFalse(self.VerseDay.objects.exists())
+
+    def test_the_verse_on_the_home_feed_is_not_a_visit(self):
+        res = self.client.get('/api/daily-verse/?via=feed')
+        self.assertEqual(res.status_code, 200)
+        self.assertNotIn('streak', res.data)
+        self.assertFalse(self.VerseDay.objects.exists())

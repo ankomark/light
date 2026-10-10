@@ -107,6 +107,12 @@ const PostTile = memo(({ post, size, isSelf, onPress, onLongPress }) => {
       {post.content_type === 'book' && (
         <View style={styles.videoBadge}><Ionicons name="book" size={10} color={colors.white} /></View>
       )}
+      {post.content_type === 'product' && (
+        <View style={styles.videoBadge}><Ionicons name="pricetag" size={10} color={colors.white} /></View>
+      )}
+      {post.content_type === 'service' && (
+        <View style={styles.videoBadge}><Ionicons name="briefcase" size={10} color={colors.white} /></View>
+      )}
       {post.content_type === 'video' && (
         <View style={styles.videoBadge}><Ionicons name="play" size={10} color={colors.white} /></View>
       )}

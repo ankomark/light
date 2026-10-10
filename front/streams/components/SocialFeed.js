@@ -15,6 +15,7 @@ import { Image } from 'expo-image';
 import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import BookPostMedia from './BookPostMedia';
+import ItemPostMedia from './ItemPostMedia';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import GlassView from './GlassView';
@@ -36,6 +37,7 @@ import PendingPosts from './PendingPosts';
 import { DownloadButton, SaveButton, LikeButton, ShareButton } from './SocialActions';
 import { PostSkeleton } from './SkeletonLoader';
 import StoriesBar from './StoriesBar';
+import FeedVerseCard from './FeedVerseCard';
 import AudioVisualizer from './AudioVisualizer';
 import RotatingBackground from './RotatingBackground';
 import ScreenVignette from './ScreenVignette';
@@ -641,6 +643,8 @@ const PostCard = React.memo(function PostCard({
       {renderHeader({ item })}
       {item.content_type === 'book' ? (
         <BookPostMedia item={item} width={cardW} onDoubleTapLike={onDoubleTapLike} />
+      ) : item.content_type === 'product' || item.content_type === 'service' ? (
+        <ItemPostMedia item={item} width={cardW} onDoubleTapLike={onDoubleTapLike} />
       ) : (
         <PostMedia
           item={item}
@@ -1406,8 +1410,9 @@ const SocialFeed = ({ showBackground = true }) => {
             caption={item.caption}
             username={item.user?.username}
           />
-          {/* A book post's picture is its cover: nothing of the poster's to save. */}
-          {item.content_type !== 'book' ? (
+          {/* A card's picture (a book's cover, a product's photo) is the
+              thing's, not something the poster made to save. */}
+          {item.content_type === 'image' || item.content_type === 'video' ? (
             <DownloadButton
               mediaUrl={item.mediaUrl}
               contentType={item.content_type}
@@ -1654,6 +1659,8 @@ const SocialFeed = ({ showBackground = true }) => {
                 scrolls up behind it for the frosted-glass effect. */}
             <View style={{ height: topBarH }} />
             <StoriesBar navigation={navigation} refreshSignal={storiesRefresh} />
+            {/* The verse of the day, pinned above the posts (not in search). */}
+            {!searchQuery ? <FeedVerseCard width={cardW} /> : null}
             {/* Offline, or a load failed, with posts still on screen: say so
                 quietly instead of a popup. (Nothing on screen: the empty
                 state below has its own Retry.) */}

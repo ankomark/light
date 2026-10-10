@@ -34,6 +34,7 @@ import { MARKET_CATEGORIES } from '../../utils/categoryIcons';
 import CategoryPicker from './CategoryPicker';
 import { FormSection, Field, FormInput, Choices, formStyles } from './FormParts';
 import { formTheme as F } from './formTheme';
+import ShareToFeedSwitch from '../ShareToFeedSwitch';
 
 const CURRENCIES = [
   { code: 'KES', label: 'KES (Ksh)' },
@@ -91,6 +92,8 @@ const AddProduct = () => {
   const [track, setTrack] = useState(null);
   const [progress, setProgress] = useState(null);
   const [saveDefault, setSaveDefault] = useState(true);
+  // Its card in the seller's feed once it's up (on unless switched off).
+  const [shareToFeed, setShareToFeed] = useState(true);
   const whatsappInputRef = useRef(null);
 
   // The field being typed in stays above the keyboard (KeyboardLift).
@@ -237,6 +240,7 @@ const AddProduct = () => {
       // Said outright: a multipart form that leaves a true/false field out
       // used to save the product as not for sale.
       data.append('is_available', 'true');
+      data.append('share_to_feed', shareToFeed ? 'true' : 'false');
       data.append('whatsapp_number', formData.whatsapp_number);
       data.append('contact_number', formData.contact_number);
       data.append('location', formData.location);
@@ -491,6 +495,8 @@ const AddProduct = () => {
           </Text>
         </TouchableOpacity>
       </FormSection>
+
+      <ShareToFeedSwitch value={shareToFeed} onValueChange={setShareToFeed} testID="product-share-to-feed" />
 
       <TouchableOpacity
         style={[formStyles.submit, loading && formStyles.submitBusy]}

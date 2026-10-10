@@ -14,6 +14,7 @@ import {
 import { createSound } from '../services/audioPlayer';
 import AppVideo from './AppVideo';
 import BookPostMedia from './BookPostMedia';
+import ItemPostMedia from './ItemPostMedia';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -298,6 +299,10 @@ const PostDetail = ({ route, navigation }) => {
         {post.content_type === 'book' ? (
           <View style={[styles.bookFrame, { width: mediaFrameW }]}>
             <BookPostMedia item={post} width={mediaFrameW} />
+          </View>
+        ) : post.content_type === 'product' || post.content_type === 'service' ? (
+          <View style={[styles.bookFrame, { width: mediaFrameW }]}>
+            <ItemPostMedia item={post} width={mediaFrameW} />
           </View>
         ) : (
         <View style={[styles.mediaFrame, { aspectRatio, width: mediaFrameW }]}>

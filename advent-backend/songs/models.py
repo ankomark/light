@@ -482,7 +482,14 @@ class SocialPost(models.Model):
         # A book (or a passage from one) shared to the feed: drawn as a book
         # card; media_file / thumbnail carry its cover for grids.
         ('book', 'Book'),
+        # A product for sale / a listed service, posted when it goes up
+        # (songs/feed_cards.py): drawn as its card, opening the shop / listing.
+        ('product', 'Product'),
+        ('service', 'Service'),
     )
+    # The kinds drawn as cards rather than as someone's picture or video: the
+    # For You feed spaces them out (at most one in every five posts).
+    CARD_TYPES = ('book', 'product', 'service')
     # Who can see the post. Enforced by visible_posts_q() on every read path.
     VISIBILITY_PUBLIC = 'public'
     VISIBILITY_FOLLOWERS = 'followers'
@@ -494,7 +501,7 @@ class SocialPost(models.Model):
     )
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='social_posts')
-    content_type = models.CharField(max_length=5, choices=CONTENT_TYPES)
+    content_type = models.CharField(max_length=10, choices=CONTENT_TYPES)
     # Media reference: absolute URL (R2) or legacy Cloudinary public_id.
     media_file = models.CharField(max_length=500, blank=True, null=True)
     # Poster frame (R2 URL) for video posts, generated on-device at upload.
@@ -525,6 +532,11 @@ class SocialPost(models.Model):
     book_quote = models.TextField(max_length=2000, blank=True, default='')
     book_chapter = models.ForeignKey('Chapter', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     book_block = models.PositiveIntegerField(null=True, blank=True)
+    # Product / service posts: the thing itself (gone with it).
+    product = models.ForeignKey('Product', null=True, blank=True, on_delete=models.CASCADE,
+                                related_name='feed_posts')
+    service = models.ForeignKey('Videostudio', null=True, blank=True, on_delete=models.CASCADE,
+                                related_name='feed_posts')
 
     caption = models.TextField(blank=True)
     tags = models.CharField(max_length=200, blank=True)

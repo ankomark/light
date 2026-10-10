@@ -225,6 +225,9 @@ class ProductSerializer(serializers.ModelSerializer):
                 product=product,
                 image=r2.upload_file(image, 'products/images'),
             )
+        # On sale: its card in the seller's feed (unless they said no).
+        from ..feed_cards import post_product
+        post_product(product, self.context.get('request'))
         return product
 
     def to_representation(self, instance):

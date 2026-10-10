@@ -2,6 +2,54 @@ from .common import *  # noqa: F401,F403
 from .music import TrackSerializer
 
 
+
+# ── Product / service cards (songs/feed_cards.py posts them) ──────────────────
+
+def _first_product_image(product):
+    imgs = list(product.images.all())             # prefetched by the feed query
+    if not imgs:
+        return ''
+    primary = next((im for im in imgs if im.is_primary), imgs[0])
+    return media.resolve(primary.image) or ''
+
+
+def product_card(obj):
+    if obj.content_type != 'product' or not obj.product_id:
+        return None
+    p = obj.product
+    return {
+        'id': p.id, 'slug': p.slug, 'title': p.title, 'description': (p.description or '')[:240],
+        'price': str(p.price), 'currency': p.currency, 'image': _first_product_image(p),
+        'location': p.location or '', 'is_available': p.is_available,
+        'seller': {'id': p.seller_id, 'username': p.seller.username},
+    }
+
+
+def service_card(obj):
+    if obj.content_type != 'service' or not obj.service_id:
+        return None
+    s = obj.service
+    gallery = s.gallery if isinstance(s.gallery, list) else []
+    first = gallery[0] if gallery else None
+    cover = media.resolve(s.cover_image) or media.resolve(
+        (first.get('url') if isinstance(first, dict) else first) or '') or ''
+    return {
+        'id': s.id, 'name': s.name, 'category': s.category, 'description': (s.description or '')[:240],
+        'location': s.location or '', 'cover': cover, 'logo': media.resolve(s.logo) or '',
+        'is_verified': s.is_verified, 'rate': s.rate_description or '',
+    }
+
+
+def card_picture(obj):
+    """The still a product / service post shows in grids and shares."""
+    if obj.content_type == 'product' and obj.product_id:
+        return _first_product_image(obj.product) or None
+    if obj.content_type == 'service' and obj.service_id:
+        card = service_card(obj)
+        return (card['cover'] or card['logo']) or None
+    return None
+
+
 class FeedSongSerializer(serializers.ModelSerializer):
     """Slim attached-song payload for the feed. The full TrackSerializer runs
     a likes COUNT + an is_liked EXISTS per track — an N+1 across a page of posts
@@ -35,6 +83,9 @@ class SocialPostSerializer(serializers.ModelSerializer):
     thumbnail_url = serializers.SerializerMethodField()
     # A book post: the book's card (and the passage shared from it).
     book = serializers.SerializerMethodField()
+    # A product / service post: its card.
+    product = serializers.SerializerMethodField()
+    service = serializers.SerializerMethodField()
     song_id = serializers.PrimaryKeyRelatedField(
         queryset=Track.objects.all(),
         source='song',
@@ -55,7 +106,7 @@ class SocialPostSerializer(serializers.ModelSerializer):
             'caption', 'tags', 'location', 'duration', 'width', 'height',
             'created_at', 'updated_at', 'likes_count', 'comments_count',
             'view_count', 'is_liked', 'is_saved', 'can_edit','optimized_url',
-            'visibility', 'comments_enabled', 'client_id', 'book',
+            'visibility', 'comments_enabled', 'client_id', 'book', 'product', 'service',
         ]
         read_only_fields = ['user', 'created_at', 'updated_at', 'view_count']
         extra_kwargs = {
@@ -104,17 +155,23 @@ class SocialPostSerializer(serializers.ModelSerializer):
             'block': obj.book_block,
         }
 
+    def get_product(self, obj):
+        return product_card(obj)
+
+    def get_service(self, obj):
+        return service_card(obj)
+
     def get_media_url(self, obj):
         # Stored references are absolute R2 URLs; new uploads arrive already
         # trimmed/compressed client-side, so there are no URL transforms.
-        return media.resolve(obj.media_file)
+        return media.resolve(obj.media_file) or card_picture(obj)
 
     def get_thumbnail_url(self, obj):
         # Video poster frame (R2). For image posts, fall back to the image
         # itself so grids/explore always have a still to show.
         return media.resolve(obj.thumbnail) or (
             media.resolve(obj.media_file) if obj.content_type in ('image', 'book') else None
-        )
+        ) or card_picture(obj)
 
     def get_optimized_url(self, obj):
         # No delivery-transform tier yet (comes with the custom media domain) —

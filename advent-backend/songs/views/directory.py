@@ -284,7 +284,10 @@ class VideoStudioViewSet(viewsets.ModelViewSet):
         return VideoStudioSerializer
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        service = serializer.save(created_by=self.request.user)
+        # Listed: its card in the owner's feed (unless they said no).
+        from ..feed_cards import post_service
+        post_service(service, self.request)
 
     def get_queryset(self):
         qs = super().get_queryset()
